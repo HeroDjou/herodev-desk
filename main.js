@@ -24,7 +24,9 @@ const CONFIG_PATH = path.join(__dirname, 'config.json');
 function loadConfig() {
 	try {
 		if (fs.existsSync(CONFIG_PATH)) {
-			return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+			const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
+			const sanitized = raw.replace(/^\uFEFF/, '');
+			return JSON.parse(sanitized);
 		}
 	} catch (error) {
 		console.error('Error loading config:', error);
@@ -40,6 +42,178 @@ function saveConfig(config) {
 		console.error('Error saving config:', error);
 		return false;
 	}
+}
+
+function normalizeUrl(rawUrl) {
+	try {
+		const parsed = new URL(rawUrl);
+		const cleanPath = parsed.pathname.replace(/\/+$/, '');
+		return `${parsed.protocol}//${parsed.host}${cleanPath}`.toLowerCase();
+	} catch {
+		return String(rawUrl || '').trim().toLowerCase();
+	}
+}
+
+function isLocalServiceUrl(rawUrl) {
+	try {
+		const parsed = new URL(rawUrl);
+		return ['localhost', '127.0.0.1'].includes(parsed.hostname);
+	} catch {
+		return false;
+	}
+}
+
+function resolveServiceConfig(url, serviceName) {
+	const config = loadConfig();
+	if (!config || !config.services) return null;
+
+	const entries = Object.entries(config.services);
+	const targetUrl = normalizeUrl(url);
+
+	let match = entries.find(([_, service]) => normalizeUrl(service?.url || '') === targetUrl);
+	if (!match && serviceName) {
+		const targetName = String(serviceName).trim().toLowerCase();
+		match = entries.find(([key, service]) => {
+			const keyName = String(key || '').toLowerCase();
+			const displayName = String(service?.name || '').toLowerCase();
+			return keyName === targetName || displayName === targetName;
+		});
+	}
+
+	if (!match) return null;
+	const [key, service] = match;
+	return { key, service };
+}
+
+function buildAutoLoginScript({ username, password, shouldTrySkip, shouldAutoSubmit }) {
+	const payload = JSON.stringify({
+		username: username || '',
+		password: password || '',
+		shouldTrySkip: !!shouldTrySkip,
+		shouldAutoSubmit: !!shouldAutoSubmit
+	});
+
+	return `(() => {
+		const cfg = ${payload};
+
+		const setValue = (input, value) => {
+			if (!input || typeof value !== 'string') return false;
+			if (input.value === value) return false;
+			input.focus();
+			input.value = value;
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+			input.dispatchEvent(new Event('change', { bubbles: true }));
+			return true;
+		};
+
+		const firstVisible = (list) => list.find((el) => {
+			if (!el || el.disabled) return false;
+			const style = window.getComputedStyle(el);
+			return style.display !== 'none' && style.visibility !== 'hidden';
+		});
+
+		const usernameCandidates = [
+			...document.querySelectorAll('input[type="email"]'),
+			...document.querySelectorAll('input[name*="user" i], input[id*="user" i]'),
+			...document.querySelectorAll('input[name*="login" i], input[id*="login" i]'),
+			...document.querySelectorAll('input[name*="email" i], input[id*="email" i]'),
+			...document.querySelectorAll('input[type="text"]')
+		];
+
+		const passwordCandidates = [
+			...document.querySelectorAll('input[type="password"]')
+		];
+
+		const userInput = firstVisible(usernameCandidates);
+		const passInput = firstVisible(passwordCandidates);
+
+		let changed = false;
+		if (cfg.username && userInput) {
+			changed = setValue(userInput, cfg.username) || changed;
+		}
+		if (cfg.password && passInput) {
+			changed = setValue(passInput, cfg.password) || changed;
+		}
+
+		if (cfg.shouldAutoSubmit && passInput) {
+			const submit = firstVisible([
+				...document.querySelectorAll('button[type="submit"], input[type="submit"]'),
+				...document.querySelectorAll('button, a')
+			].filter((el) => {
+				const txt = (el.textContent || el.value || '').toLowerCase();
+				return /entrar|login|sign in|submit|acessar|connect/.test(txt);
+			}));
+
+			if (submit && (changed || !submit.disabled)) {
+				submit.click();
+			}
+		}
+
+		if (cfg.shouldTrySkip && passInput) {
+			const skipEl = firstVisible([
+				...document.querySelectorAll('a, button')
+			].filter((el) => {
+				const txt = (el.textContent || '').toLowerCase();
+				const href = (el.getAttribute && el.getAttribute('href')) || '';
+				return /skip|pular|ignorar|continuar sem|without login/.test(txt) || /skip/i.test(href);
+			}));
+
+			if (skipEl) {
+				skipEl.click();
+			}
+		}
+	})();`;
+}
+
+function setupHttpBasicAutoLogin(webContents, url, serviceName) {
+	const resolved = resolveServiceConfig(url, serviceName);
+	if (!resolved || !resolved.service || !resolved.service.autoLogin) return;
+	if (!isLocalServiceUrl(url)) return;
+
+	const credentials = resolved.service.credentials || {};
+	const username = String(credentials.username || '');
+	const password = String(credentials.password || '');
+	if (!username && !password) return;
+
+	let attempted = false;
+	webContents.on('login', (event, _request, authInfo, callback) => {
+		if (attempted) return;
+		if (authInfo && authInfo.isProxy) return;
+
+		attempted = true;
+		event.preventDefault();
+		callback(username, password);
+	});
+}
+
+function setupAutoLogin(webContents, url, serviceName) {
+	const resolved = resolveServiceConfig(url, serviceName);
+	if (!resolved || !resolved.service || !resolved.service.autoLogin) return;
+	if (!isLocalServiceUrl(url)) return;
+
+	setupHttpBasicAutoLogin(webContents, url, serviceName);
+
+	const credentials = resolved.service.credentials || {};
+	const username = credentials.username || '';
+	const password = credentials.password || '';
+	const hasCredentials = !!(username || password);
+
+	const script = buildAutoLoginScript({
+		username,
+		password,
+		shouldTrySkip: !hasCredentials,
+		shouldAutoSubmit: !!(username && password)
+	});
+
+	const runAutoLogin = () => {
+		webContents.executeJavaScript(script).catch(() => {});
+		setTimeout(() => {
+			webContents.executeJavaScript(script).catch(() => {});
+		}, 700);
+	};
+
+	webContents.on('did-finish-load', runAutoLogin);
+	webContents.on('did-navigate-in-page', runAutoLogin);
 }
 
 function createWindow() {
@@ -150,6 +324,7 @@ function createTab(tabId, url, title) {
 
 	// Adicionar tab depois da mainView para ficar por cima
 	mainWindow.contentView.addChildView(tabView);
+	setupAutoLogin(tabView.webContents, url, title);
 	tabView.webContents.loadURL(url);
 	tabView.setVisible(true);
 
@@ -251,6 +426,7 @@ ipcMain.on('open-service', (event, { url, openType, serviceName }) => {
 		});
 		const serviceView = new WebContentsView();
 		serviceWindow.contentView.addChildView(serviceView);
+		setupAutoLogin(serviceView.webContents, url, title);
 		serviceView.webContents.loadURL(url);
 		
 		// Atualizar título quando a página carregar

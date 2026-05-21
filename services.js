@@ -55,8 +55,17 @@ async function isContainerRunning() {
 }
 
 async function getServiceStatus(serviceName) {
-    const result = await execInContainer(`systemctl is-active ${serviceName}`);
-    return result === 'active';
+    const result = await execInContainer(`bash -lc "systemctl is-active ${serviceName} 2>/dev/null || true"`);
+    if (result === null) {
+        return { active: false, installed: false };
+    }
+
+    const state = String(result).trim().toLowerCase();
+    if (state === '' || state === 'unknown' || state === 'not-found') {
+        return { active: false, installed: false };
+    }
+
+    return { active: state === 'active', installed: true };
 }
 
 async function getAllServicesStatus() {
@@ -67,12 +76,12 @@ async function getAllServicesStatus() {
 
     const statuses = {};
     for (const [service, info] of Object.entries(SERVICES)) {
-        const isActive = await getServiceStatus(service);
+        const status = await getServiceStatus(service);
         statuses[service] = {
             ...info,
             service,
-            active: isActive,
-            installed: isActive !== null
+            active: status.active,
+            installed: status.installed
         };
     }
 
