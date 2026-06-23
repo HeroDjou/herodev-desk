@@ -4,10 +4,12 @@ const {
 	WebContentsView,
 	ipcMain,
 	shell,
-	globalShortcut
+	globalShortcut,
+	dialog
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const log = require('./logger');
 const services = require('./services');
 const { createTray, updateTrayMenu, destroyTray } = require('./tray');
 
@@ -16,9 +18,144 @@ let mainView;
 let tabs = new Map();
 let activeTabId = null;
 let statusInterval = null;
+let statusPolling = false;      // guarda de reentrancia do polling
+let memInterval = null;
+let memWarned = false;
+let isHandlingFatal = false;    // evita reentrancia no handler fatal
+let recoverState = { tries: 0, nextAt: 0, running: false };
 
 const TAB_BAR_HEIGHT = 42;
-const CONFIG_PATH = path.join(__dirname, 'config.json');
+
+// config.json: o app empacotado e read-only (asar). Mantemos a copia gravavel
+// do usuario em userData, semeando a partir do bundle na primeira execucao.
+const BUNDLED_CONFIG_PATH = path.join(__dirname, 'config.json');
+let CONFIG_PATH;
+try {
+	CONFIG_PATH = path.join(app.getPath('userData'), 'config.json');
+	if (!fs.existsSync(CONFIG_PATH) && fs.existsSync(BUNDLED_CONFIG_PATH)) {
+		fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+		fs.copyFileSync(BUNDLED_CONFIG_PATH, CONFIG_PATH);
+	}
+} catch (e) {
+	CONFIG_PATH = BUNDLED_CONFIG_PATH;
+}
+
+// ============================================================
+// Handlers globais: o app NUNCA deve encerrar em silencio.
+// ============================================================
+const MAX_RESTARTS = 3;
+const RESTART_WINDOW_MS = 2 * 60 * 1000;
+function restartHistoryPath() {
+	try { return path.join(app.getPath('userData'), 'restart-history.json'); }
+	catch { return path.join(__dirname, 'restart-history.json'); }
+}
+function readRestartHistory() {
+	try {
+		const arr = JSON.parse(fs.readFileSync(restartHistoryPath(), 'utf8'));
+		const cutoff = Date.now() - RESTART_WINDOW_MS;
+		return Array.isArray(arr) ? arr.filter(t => t > cutoff) : [];
+	} catch { return []; }
+}
+function recordRestart() {
+	try {
+		const arr = readRestartHistory();
+		arr.push(Date.now());
+		fs.writeFileSync(restartHistoryPath(), JSON.stringify(arr));
+	} catch (e) { log.warn('Falha ao gravar restart-history:', e.message); }
+}
+
+function handleFatal(kind, err) {
+	const msg = (err && (err.stack || err.message)) ? (err.stack || err.message) : String(err);
+	log.error(`[${kind}] ${msg}`);
+	if (isHandlingFatal) return;
+	isHandlingFatal = true;
+	try {
+		const looping = readRestartHistory().length >= MAX_RESTARTS;
+		const buttons = looping ? ['Sair', 'Continuar assim mesmo'] : ['Reiniciar', 'Continuar', 'Sair'];
+		dialog.showMessageBox(mainWindow || undefined, {
+			type: 'error',
+			buttons,
+			defaultId: 0,
+			noLink: true,
+			title: 'HeroDev - erro inesperado',
+			message: looping ? 'Falhas repetidas detectadas.' : 'Ocorreu um erro inesperado.',
+			detail: (looping ? 'O app falhou varias vezes seguidas.\n\n' : '') +
+				`Detalhe: ${msg}\n\nLog: ${log.getLogPath()}`
+		}).then(({ response }) => {
+			if (!looping && response === 0) { recordRestart(); app.relaunch(); app.exit(0); }
+			else if (!looping && response === 2) { app.isQuitting = true; app.exit(1); }
+			else if (looping && response === 0) { app.isQuitting = true; app.exit(1); }
+			else { isHandlingFatal = false; } // continuar degradado: re-arma o handler
+		}).catch(() => { isHandlingFatal = false; });
+	} catch (e) {
+		log.error('handleFatal falhou:', e.message);
+		isHandlingFatal = false;
+	}
+}
+
+process.on('uncaughtException', (e) => handleFatal('uncaughtException', e));
+process.on('unhandledRejection', (r) => {
+	const msg = (r && (r.stack || r.message)) ? (r.stack || r.message) : String(r);
+	log.error(`[unhandledRejection] ${msg}`);
+	setStatusDegraded('Um erro interno foi registrado (veja os logs).');
+});
+app.on('child-process-gone', (_e, d) => log.warn('[child-process-gone]', d && d.type, d && d.reason));
+
+// ============================================================
+// Resiliencia de webContents (renderer principal / abas / janelas)
+// ============================================================
+function errorPageDataUrl(label, reason, retryUrl) {
+	const safeReason = String(reason || '').replace(/</g, '&lt;');
+	const safeUrl = String(retryUrl || '').replace(/'/g, "%27");
+	const html = `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<style>body{font-family:system-ui,Segoe UI,Roboto,sans-serif;background:#1a1a2e;color:#e6e6e6;
+display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+.box{max-width:540px;text-align:center;padding:32px}h1{font-size:20px;margin:0 0 8px}
+p{color:#9aa;line-height:1.5}code{color:#ffb86c;word-break:break-all}
+button{margin-top:20px;padding:10px 20px;border:0;border-radius:8px;background:#4f7cff;
+color:#fff;font-size:14px;cursor:pointer}button:hover{background:#3a63d0}</style></head>
+<body><div class="box"><h1>Nao foi possivel carregar ${label}</h1>
+<p>O servico pode estar reiniciando ou indisponivel no momento.</p>
+<p><code>${safeReason}</code></p>
+<button onclick="location.href='${safeUrl}'">Tentar novamente</button></div></body></html>`;
+	return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+}
+
+function attachWebContentsResilience(view, { label, reloadUrl, isMain = false } = {}) {
+	const wc = view && view.webContents;
+	if (!wc) return;
+	wc.on('render-process-gone', (_e, d) => {
+		log.error(`[render-gone:${label}]`, d && d.reason, d && d.exitCode);
+		if (isMain) {
+			dialog.showMessageBox(mainWindow || undefined, {
+				type: 'error', buttons: ['Recarregar', 'Sair'], defaultId: 0, noLink: true,
+				title: 'HeroDev', message: 'A interface travou.',
+				detail: `Motivo: ${d && d.reason}. Deseja recarregar?`
+			}).then(({ response }) => {
+				if (response === 0 && !wc.isDestroyed()) wc.reload();
+				else { app.isQuitting = true; app.quit(); }
+			}).catch(() => {});
+		} else if (!wc.isDestroyed()) {
+			wc.loadURL(errorPageDataUrl(label, (d && d.reason) || 'render-process-gone', reloadUrl));
+		}
+	});
+	wc.on('unresponsive', () => {
+		log.warn(`[unresponsive:${label}]`);
+		if (isMain) {
+			dialog.showMessageBox(mainWindow || undefined, {
+				type: 'warning', buttons: ['Esperar', 'Recarregar'], defaultId: 0, noLink: true,
+				title: 'HeroDev', message: 'A interface nao esta respondendo.'
+			}).then(({ response }) => { if (response === 1 && !wc.isDestroyed()) wc.reload(); }).catch(() => {});
+		}
+	});
+	wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
+		if (!isMainFrame || code === -3) return; // ignora ERR_ABORTED
+		log.warn(`[did-fail-load:${label}]`, code, desc, url);
+		if (!isMain && !wc.isDestroyed()) {
+			wc.loadURL(errorPageDataUrl(label, `${desc} (${code})`, url || reloadUrl));
+		}
+	});
+}
 
 // Funções de configuração
 function loadConfig() {
@@ -29,7 +166,7 @@ function loadConfig() {
 			return JSON.parse(sanitized);
 		}
 	} catch (error) {
-		console.error('Error loading config:', error);
+		log.error('Erro lendo config:', error.message);
 	}
 	return null;
 }
@@ -39,7 +176,7 @@ function saveConfig(config) {
 		fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 4), 'utf8');
 		return true;
 	} catch (error) {
-		console.error('Error saving config:', error);
+		log.error('Erro salvando config:', error.message);
 		return false;
 	}
 }
@@ -235,15 +372,17 @@ function createWindow() {
 	});
 
 	mainWindow.contentView.addChildView(mainView);
-	
+
 	updateViewBounds();
-	
+
+	attachWebContentsResilience(mainView, { label: 'interface', isMain: true });
 	mainView.webContents.loadFile('index.html');
-	
+
 	mainView.webContents.on('did-finish-load', () => {
 		updateViewBounds();
 		mainWindow.show();
 		startStatusPolling();
+		startMemoryMonitor();
 	});
 
 	mainWindow.on('resize', updateViewBounds);
@@ -265,8 +404,8 @@ function createWindow() {
 }
 
 function startStatusPolling() {
-	sendServicesStatus();
-	statusInterval = setInterval(sendServicesStatus, 5000);
+	pollOnce();
+	statusInterval = setInterval(pollOnce, 5000);
 }
 
 function stopStatusPolling() {
@@ -274,13 +413,105 @@ function stopStatusPolling() {
 		clearInterval(statusInterval);
 		statusInterval = null;
 	}
+	if (memInterval) {
+		clearInterval(memInterval);
+		memInterval = null;
+	}
+}
+
+async function pollOnce() {
+	if (statusPolling) return;       // nao empilha ticks se o podman travar
+	statusPolling = true;
+	try {
+		await sendServicesStatus();
+	} catch (err) {
+		log.warn('pollOnce falhou (ignorado):', err && err.message);
+	} finally {
+		statusPolling = false;
+	}
 }
 
 async function sendServicesStatus() {
 	if (!mainView) return;
-	const status = await services.getAllServicesStatus();
-	mainView.webContents.send('services-status', status);
-	updateTrayMenu();
+	let status;
+	try {
+		status = await services.getAllServicesStatus();
+	} catch (err) {
+		log.warn('getAllServicesStatus falhou:', err && err.message);
+		status = { containerRunning: false, services: {}, error: err && err.message };
+	}
+	if (mainView && mainView.webContents && !mainView.webContents.isDestroyed()) {
+		mainView.webContents.send('services-status', status);
+	}
+	try { await updateTrayMenu(status); } catch (e) { log.warn('updateTrayMenu falhou:', e && e.message); }
+	onStatusObserved(status);
+}
+
+// ---- Aviso / estado degradado na UI (nao-bloqueante) ----
+function setStatusDegraded(text) {
+	try {
+		if (mainView && mainView.webContents && !mainView.webContents.isDestroyed()) {
+			mainView.webContents.send('app-notice', { level: text ? 'warn' : 'ok', text: text || '' });
+		}
+	} catch { /* ignore */ }
+}
+
+// ---- Auto-recuperacao do container com backoff exponencial ----
+const RECOVERY_BACKOFF = [5000, 15000, 30000, 60000];
+function onStatusObserved(status) {
+	if (status && status.containerRunning) {
+		if (recoverState.tries !== 0) setStatusDegraded('');
+		recoverState = { tries: 0, nextAt: 0, running: false };
+		return;
+	}
+	if (recoverState.running || Date.now() < recoverState.nextAt) return;
+	attemptContainerRecovery();
+}
+
+async function attemptContainerRecovery() {
+	recoverState.running = true;
+	const n = recoverState.tries + 1;
+	setStatusDegraded(`Servicos fora do ar - tentando reiniciar (tentativa ${n})...`);
+	log.warn(`Auto-recuperacao do container: tentativa ${n}`);
+	try {
+		const ok = await services.startContainer();
+		if (ok) {
+			log.info('Container recuperado.');
+			recoverState = { tries: 0, nextAt: 0, running: false };
+			setStatusDegraded('');
+			return;
+		}
+		throw new Error('startContainer retornou false');
+	} catch (e) {
+		log.warn('Recuperacao falhou:', e && e.message);
+		const idx = Math.min(n - 1, RECOVERY_BACKOFF.length - 1);
+		recoverState.tries = n;
+		recoverState.nextAt = Date.now() + RECOVERY_BACKOFF[idx];
+		setStatusDegraded(`Falha ao reiniciar. Nova tentativa em ${RECOVERY_BACKOFF[idx] / 1000}s.`);
+	} finally {
+		recoverState.running = false;
+	}
+}
+
+// ---- Monitor de memoria (avisa antes de OOM do proprio app) ----
+const MEM_WARN_MB = 1500;
+function startMemoryMonitor() {
+	if (memInterval) return;
+	memInterval = setInterval(() => {
+		try {
+			const metrics = app.getAppMetrics();
+			const totalMB = metrics.reduce((s, m) => s + ((m.memory && m.memory.workingSetSize) || 0), 0) / 1024;
+			if (totalMB > MEM_WARN_MB && !memWarned) {
+				memWarned = true;
+				log.warn(`Uso de memoria alto (~${Math.round(totalMB)} MB).`);
+				setStatusDegraded('Memoria alta - considere reiniciar o HeroDev.');
+			} else if (totalMB < MEM_WARN_MB * 0.7) {
+				memWarned = false;
+			}
+		} catch (e) {
+			log.warn('Monitor de memoria:', e && e.message);
+		}
+	}, 30000);
 }
 
 const STATUS_BAR_HEIGHT = 40;
@@ -324,6 +555,7 @@ function createTab(tabId, url, title) {
 
 	// Adicionar tab depois da mainView para ficar por cima
 	mainWindow.contentView.addChildView(tabView);
+	attachWebContentsResilience(tabView, { label: title, reloadUrl: url });
 	setupAutoLogin(tabView.webContents, url, title);
 	tabView.webContents.loadURL(url);
 	tabView.setVisible(true);
@@ -426,6 +658,7 @@ ipcMain.on('open-service', (event, { url, openType, serviceName }) => {
 		});
 		const serviceView = new WebContentsView();
 		serviceWindow.contentView.addChildView(serviceView);
+			attachWebContentsResilience(serviceView, { label: title, reloadUrl: url });
 		setupAutoLogin(serviceView.webContents, url, title);
 		serviceView.webContents.loadURL(url);
 		
@@ -565,16 +798,24 @@ ipcMain.on('toggle-devtools', (event) => {
 	}
 });
 
-app.whenReady().then(() => {
-	createWindow();
-	
-	// Registrar atalho global para DevTools (Ctrl+Shift+I)
-	globalShortcut.register('CommandOrControl+Shift+I', () => {
-		if (mainView && mainView.webContents) {
-			mainView.webContents.toggleDevTools();
-		}
+if (!app.requestSingleInstanceLock()) {
+	app.quit();
+} else {
+	app.on('second-instance', () => {
+		if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
 	});
-});
+
+	app.whenReady().then(() => {
+		createWindow();
+
+		// Registrar atalho global para DevTools (Ctrl+Shift+I)
+		globalShortcut.register('CommandOrControl+Shift+I', () => {
+			if (mainView && mainView.webContents) {
+				mainView.webContents.toggleDevTools();
+			}
+		});
+	});
+}
 
 app.on('will-quit', () => {
 	// Desregistrar todos os atalhos

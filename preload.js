@@ -40,6 +40,9 @@ contextBridge.exposeInMainWorld('api', {
     onServicesStatus: (callback) => {
         ipcRenderer.on('services-status', (event, status) => callback(status));
     },
+    onAppNotice: (callback) => {
+        ipcRenderer.on('app-notice', (event, notice) => callback(notice));
+    },
     // Config APIs
     getConfig: () => {
         return ipcRenderer.invoke('get-config');

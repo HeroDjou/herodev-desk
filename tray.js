@@ -60,13 +60,14 @@ function createTray(window) {
     return tray;
 }
 
-async function updateTrayMenu() {
-    const status = await services.getAllServicesStatus();
-    
-    if (tray) {
-        tray.setImage(createTrayIcon(status.containerRunning));
-        tray.setToolTip(`HeroDev - ${status.containerRunning ? 'Ativo' : 'Parado'}`);
-    }
+async function updateTrayMenu(statusArg) {
+    // Reusa o status ja calculado pelo polling (evita 2x getAllServicesStatus/5s).
+    const status = statusArg || await services.getAllServicesStatus();
+
+    if (!tray || (tray.isDestroyed && tray.isDestroyed())) return;
+
+    tray.setImage(createTrayIcon(status.containerRunning));
+    tray.setToolTip(`HeroDev - ${status.containerRunning ? 'Ativo' : 'Parado'}`);
     
     const serviceMenuItems = Object.entries(status.services || {})
         .filter(([_, info]) => info.installed !== false)

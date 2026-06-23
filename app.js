@@ -55,6 +55,26 @@ function initStatusListener() {
     if (typeof window.api !== 'undefined' && window.api.onHomeVisibility) {
         window.api.onHomeVisibility(setHomeVisibility);
     }
+    if (typeof window.api !== 'undefined' && window.api.onAppNotice) {
+        window.api.onAppNotice(showAppNotice);
+    }
+}
+
+function showAppNotice(notice) {
+    let el = document.getElementById('appNotice');
+    if (!notice || !notice.text) {
+        if (el) el.remove();
+        return;
+    }
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'appNotice';
+        el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;' +
+            'background:#8a2b2b;color:#fff;padding:8px 14px;font-size:13px;' +
+            'text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.35)';
+        document.body.appendChild(el);
+    }
+    el.textContent = '⚠ ' + notice.text;
 }
 
 function setHomeVisibility(isVisible) {

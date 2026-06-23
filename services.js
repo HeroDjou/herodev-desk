@@ -1,8 +1,10 @@
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
+const log = require('./logger');
 
 const CONTAINER_NAME = 'herodev';
+const EXEC_TIMEOUT = 8000; // ms: evita que um podman travado empilhe chamadas
 
 const SERVICES = {
     apache2: { name: 'Apache', port: 8080, hasUI: true },
@@ -19,10 +21,10 @@ const SERVICES = {
 
 async function execInContainer(command) {
     try {
-        const { stdout } = await execAsync(`podman exec ${CONTAINER_NAME} ${command}`);
+        const { stdout } = await execAsync(`podman exec ${CONTAINER_NAME} ${command}`, { timeout: EXEC_TIMEOUT });
         return stdout.trim();
     } catch (error) {
-        console.error(`Error executing in container: ${error.message}`);
+        log.warn(`Falha em 'podman exec ${command}':`, error.message);
         return null;
     }
 }
@@ -47,7 +49,7 @@ async function checkPodman() {
 
 async function isContainerRunning() {
     try {
-        const { stdout } = await execAsync(`podman ps --filter name=${CONTAINER_NAME} --format "{{.State}}"`);
+        const { stdout } = await execAsync(`podman ps --filter name=${CONTAINER_NAME} --format "{{.State}}"`, { timeout: EXEC_TIMEOUT });
         return stdout.trim() === 'running';
     } catch {
         return false;
@@ -74,16 +76,18 @@ async function getAllServicesStatus() {
         return { containerRunning: false, services: {} };
     }
 
+    const entries = Object.entries(SERVICES);
+    const results = await Promise.all(entries.map(([service]) => getServiceStatus(service)));
+
     const statuses = {};
-    for (const [service, info] of Object.entries(SERVICES)) {
-        const status = await getServiceStatus(service);
+    entries.forEach(([service, info], i) => {
         statuses[service] = {
             ...info,
             service,
-            active: status.active,
-            installed: status.installed
+            active: results[i].active,
+            installed: results[i].installed
         };
-    }
+    });
 
     return { containerRunning: true, services: statuses };
 }
