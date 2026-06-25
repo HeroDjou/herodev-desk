@@ -37,6 +37,9 @@ contextBridge.exposeInMainWorld('api', {
     getContainerInfo: () => {
         return ipcRenderer.invoke('get-container-info');
     },
+    getStack: () => {
+        return ipcRenderer.invoke('get-stack');
+    },
     onServicesStatus: (callback) => {
         ipcRenderer.on('services-status', (event, status) => callback(status));
     },

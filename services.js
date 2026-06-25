@@ -159,6 +159,15 @@ async function getHealthCheck() {
     }
 }
 
+async function getStack() {
+    const result = await execInContainer('herodev-stack');
+    try {
+        return JSON.parse(result);
+    } catch {
+        return [];
+    }
+}
+
 module.exports = {
     SERVICES,
     CONTAINER_NAME,
@@ -173,5 +182,6 @@ module.exports = {
     stopContainer,
     restartContainer,
     getContainerInfo,
-    getHealthCheck
+    getHealthCheck,
+    getStack
 };

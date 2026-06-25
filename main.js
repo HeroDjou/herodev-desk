@@ -782,6 +782,10 @@ ipcMain.handle('get-container-info', async () => {
 	return services.getContainerInfo();
 });
 
+ipcMain.handle('get-stack', async () => {
+	return services.getStack();
+});
+
 // Config handlers
 ipcMain.handle('get-config', async () => {
 	return loadConfig();

@@ -58,6 +58,7 @@ function initStatusListener() {
     if (typeof window.api !== 'undefined' && window.api.onAppNotice) {
         window.api.onAppNotice(showAppNotice);
     }
+    loadStack();
 }
 
 function showAppNotice(notice) {
@@ -75,6 +76,30 @@ function showAppNotice(notice) {
         document.body.appendChild(el);
     }
     el.textContent = '⚠ ' + notice.text;
+}
+
+// Painel "Stack instalado": linguagens / ferramentas / servidores + versoes.
+function loadStack() {
+    const el = document.getElementById('stackContainer');
+    if (!el || typeof window.api === 'undefined' || !window.api.getStack) return;
+    window.api.getStack().then(stack => {
+        stack = Array.isArray(stack) ? stack : [];
+        if (!stack.length) { el.innerHTML = '<span class="text-muted small">Stack indisponível</span>'; return; }
+        const cats = {};
+        stack.forEach(it => { (cats[it.categoria] = cats[it.categoria] || []).push(it); });
+        const chip = it => `
+            <span class="d-inline-flex align-items-center gap-2"
+                  style="background:rgba(127,127,127,.12);border:1px solid rgba(127,127,127,.25);border-radius:20px;padding:5px 12px;font-size:13px">
+                <i class="${it.icon}" style="opacity:.85"></i>
+                <span>${it.nome}</span>
+                <span style="opacity:.6;font-size:12px">${it.versao}</span>
+            </span>`;
+        el.innerHTML = Object.keys(cats).map(cat => `
+            <div class="text-center">
+                <div class="text-muted text-uppercase mb-2" style="font-size:11px;letter-spacing:.5px">${cat}</div>
+                <div class="d-flex flex-wrap justify-content-center gap-2">${cats[cat].map(chip).join('')}</div>
+            </div>`).join('');
+    }).catch(() => { el.innerHTML = '<span class="text-muted small">Stack indisponível</span>'; });
 }
 
 function setHomeVisibility(isVisible) {
