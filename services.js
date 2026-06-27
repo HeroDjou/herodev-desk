@@ -36,9 +36,9 @@ async function checkPodman() {
         return true;
     } catch {
         try {
-            await execAsync('podman machine stop');
-            await execAsync('podman machine start');
-            await execAsync('podman info');
+            // VM parada (ex: boot do Mac) → só inicia; machine stop falha se já parada
+            await execAsync('podman machine start', { timeout: 60000 });
+            await execAsync('podman info', { timeout: 10000 });
             return true;
         } catch {
             return false;
