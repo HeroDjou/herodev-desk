@@ -10,6 +10,7 @@ const SERVICES = {
     apache2: { name: 'Apache', port: 8080, hasUI: true },
     mariadb: { name: 'MariaDB', port: 3306, hasUI: false },
     'code-server': { name: 'VSCode', port: 12777, hasUI: true },
+    mailpit: { name: 'Mailpit', port: 8025, hasUI: false },
     filebrowser: { name: 'Arquivos', port: 8081, hasUI: true, optional: true },
     'redis-server': { name: 'Redis', port: 6379, hasUI: false, optional: true },
     mongod: { name: 'MongoDB', port: 27017, hasUI: false, optional: true },

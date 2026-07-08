@@ -35,6 +35,17 @@
                                                         "password":  ""
                                                     }
                                 },
+                     "mailpit":  {
+                                     "name":  "Mailpit",
+                                     "url":  "http://localhost:8080/mailpit",
+                                     "port":  8080,
+                                     "enabled":  true,
+                                     "autoLogin":  false,
+                                     "credentials":  {
+                                                         "username":  "",
+                                                         "password":  ""
+                                                     }
+                                 },
                      "filebrowser":  {
                                          "name":  "Arquivos",
                                          "url":  "http://localhost:8081",
