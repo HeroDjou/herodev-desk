@@ -1,4 +1,4 @@
-# VSDesktop
+# HeroDev Desktop
 
 > **Projeto em desenvolvimento** - Esta aplicação está em constante evolução e não é um produto final. Oferecida "como está", sem suporte oficial. Contribuições via pull request são bem-vindas!
 
@@ -24,7 +24,7 @@ Aplicação desktop Electron para gerenciamento do HeroDev Container. Fornece in
 
 ## Visão geral
 
-VSDesktop é uma aplicação desktop construída com Electron que atua como painel de controle para o HeroDev Container. Permite gerenciar serviços, visualizar status em tempo real e acessar interfaces web de forma integrada através de um sistema de abas.
+HeroDev Desktop é uma aplicação desktop construída com Electron que atua como painel de controle para o HeroDev Container. Permite gerenciar serviços, visualizar status em tempo real e acessar interfaces web de forma integrada através de um sistema de abas.
 
 ### Características principais
 
@@ -60,7 +60,7 @@ VSDesktop é uma aplicação desktop construída com Electron que atua como pain
 Na pasta raiz do herodev-cont:
 
 ```cmd
-setup-vsdesktop.bat
+setup-herodev-desk.bat
 ```
 
 ### Via linha de comando
@@ -72,7 +72,7 @@ podman exec -it herodev bash
 
 2. Navegue até a pasta:
 ```bash
-cd /workspace/vsdesktop
+cd /workspace/herodev-desk
 ```
 
 3. Instale dependências:
@@ -97,13 +97,13 @@ npm run package:mac_x64
 5. O executável será gerado em:
 ```
 # Windows
-out/vsdesktop-win32-x64/vsdesktop.exe
+out/herodev-desk-win32-x64/herodev-desk.exe
 
 # macOS ARM64
-out/vsdesktop-darwin-arm64/vsdesktop.app
+out/herodev-desk-darwin-arm64/herodev-desk.app
 
 # macOS x64
-out/vsdesktop-darwin-x64/vsdesktop.app
+out/herodev-desk-darwin-x64/herodev-desk.app
 ```
 
 ---
@@ -582,7 +582,7 @@ podman exec -it herodev bash
 
 2. Navegue até a pasta:
 ```bash
-cd /workspace/vsdesktop
+cd /workspace/herodev-desk
 ```
 
 3. Instale dependências:
@@ -598,7 +598,7 @@ npm start
 ### Estrutura de diretórios
 
 ```
-vsdesktop/
+herodev-desk/
 ├── main.js           # Processo principal
 ├── preload.js        # Bridge IPC
 ├── services.js       # Wrapper Podman
@@ -629,7 +629,7 @@ vsdesktop/
 npm run package:win
 ```
 
-Gera executável em: `out/vsdesktop-win32-x64/vsdesktop.exe`
+Gera executável em: `out/herodev-desk-win32-x64/herodev-desk.exe`
 
 ### Build genérico
 
@@ -672,7 +672,7 @@ Veja [CONTRIBUTING.md](CONTRIBUTING.md) para mais detalhes.
 
 Via arquivo executável:
 ```cmd
-volumes\workspace\vsdesktop\out\vsdesktop-win32-x64\vsdesktop.exe
+volumes\workspace\herodev-desk\out\herodev-desk-win32-x64\herodev-desk.exe
 ```
 
 Via start-herodev.bat:

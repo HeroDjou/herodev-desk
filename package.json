@@ -1,5 +1,5 @@
 {
-  "name": "vsdesktop",
+  "name": "herodev-desk",
   "version": "1.0.0",
   "main": "main.js",
   "scripts": {
@@ -16,7 +16,7 @@
   "description": "Aplicação desktop Electron para gerenciamento do HeroDev Container",
   "repository": {
     "type": "git",
-    "url": "https://github.com/herodjou/vsdesktop.git"
+    "url": "https://github.com/herodjou/herodev-desk.git"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.10.2",
@@ -38,13 +38,13 @@
     "forge": {
       "packagerConfig": {
         "appCopyright": "Copyright © 2026 HeroDjou",
-        "appBundleId": "com.herodjou.vsdesktop",
+        "appBundleId": "com.herodjou.herodev-desk",
         "appCategoryType": "public.app-category.developer-tools",
         "win32metadata": {
           "CompanyName": "HeroDjou",
-          "ProductName": "VS Desktop",
-          "FileDescription": "VS Code portátil",
-          "OriginalFilename": "vsdesktop.exe"
+          "ProductName": "HeroDev Desktop",
+          "FileDescription": "HeroDev Desktop",
+          "OriginalFilename": "herodev-desk.exe"
         }
       }
     }

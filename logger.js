@@ -1,5 +1,5 @@
 // ============================================================
-// HeroDev VSDesktop - logger persistente SEM dependencias.
+// HeroDev Desktop - logger persistente SEM dependencias.
 // Escreve em app.getPath('logs')/herodev.log (sempre gravavel em
 // Windows/macOS/Linux, fora do asar). Rotaciona ao passar de ~5 MB.
 // Projetado para NUNCA lancar excecao (log nunca derruba o app).

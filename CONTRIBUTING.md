@@ -1,4 +1,4 @@
-# Contribuindo para VSDesktop
+# Contribuindo para HeroDev Desktop
 
 Obrigado pelo interesse em contribuir! Este projeto está em desenvolvimento ativo e toda ajuda é bem-vinda.
 
@@ -64,7 +64,7 @@ Para sugerir novas funcionalidades ou melhorias:
 ## Estrutura do Projeto
 
 ```
-vsdesktop/
+herodev-desk/
 ├── main.js          # Processo principal do Electron
 ├── preload.js       # Script de preload (bridge IPC)
 ├── services.js      # Gerenciamento de serviços Podman
