@@ -5,7 +5,8 @@ const {
 	ipcMain,
 	shell,
 	globalShortcut,
-	dialog
+	dialog,
+	Notification
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -813,7 +814,11 @@ function openHostTerminal() {
 	}
 
 	if (process.platform === 'win32') {
-		const proc = spawn('cmd.exe', ['/c', 'start', 'HeroDev Terminal', 'cmd', '/k', cmd], {
+		// As aspas do titulo sao literais de proposito: windowsVerbatimArguments
+		// desliga o escape do Node, e o `start` so trata o 1o argumento como
+		// titulo se ele vier entre aspas. Sem elas ele le "HeroDev" como o
+		// programa a executar e falha com "Windows nao pode encontrar HeroDev".
+		const proc = spawn('cmd.exe', ['/c', 'start', '"HeroDev Terminal"', 'cmd', '/k', cmd], {
 			detached: true, stdio: 'ignore', windowsVerbatimArguments: true
 		});
 		proc.on('error', (e) => log.error('Falha ao abrir terminal do host:', e.message));
@@ -1106,6 +1111,84 @@ ipcMain.handle('container-action', async (event, action) => {
 		return { success: true };
 	} catch (error) {
 		return { success: false, error: error.message };
+	}
+});
+
+// ============================================================
+// Backup do banco sob demanda
+//
+// backupRunning e um mutex de processo: o dump e caro e concorrente nao ajuda
+// (dois mysqldump simultaneos so brigam por I/O). O botao da UI ja desabilita,
+// mas isso protege o caso de duas janelas/atalhos dispararem junto.
+// ============================================================
+let backupRunning = false;
+
+function sendBackupState(state) {
+	try {
+		if (mainView && mainView.webContents && !mainView.webContents.isDestroyed()) {
+			mainView.webContents.send('backup-state', state);
+		}
+	} catch { /* ignore */ }
+}
+
+function notifyBackup(title, body) {
+	// Notification.isSupported() e false em ambiente sem desktop (ex.: sessao
+	// SSH sem X). Sem a checagem, o construtor derruba o processo principal.
+	if (!Notification.isSupported()) return;
+	try {
+		new Notification({ title, body, silent: false }).show();
+	} catch (error) {
+		log.warn('Notificacao falhou (ignorado):', error.message);
+	}
+}
+
+function formatBytes(bytes) {
+	if (!Number.isFinite(bytes)) return '?';
+	if (bytes < 1024) return `${bytes} B`;
+	const units = ['KB', 'MB', 'GB'];
+	let value = bytes / 1024;
+	let i = 0;
+	while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+	return `${value.toFixed(1)} ${units[i]}`;
+}
+
+ipcMain.handle('get-backup-status', async () => {
+	try {
+		return await services.getBackupStatus();
+	} catch (error) {
+		log.warn('get-backup-status falhou:', error.message);
+		return { available: false, count: 0, latest: null, recent: [], error: error.message };
+	}
+});
+
+ipcMain.handle('backup-now', async () => {
+	if (backupRunning) {
+		return { success: false, error: 'Ja existe um backup em andamento.' };
+	}
+
+	const node = services.getNode();
+	backupRunning = true;
+	sendBackupState({ running: true, node: node.label });
+
+	try {
+		const result = await services.runBackup();
+
+		if (result.success) {
+			const size = formatBytes(result.backup.size);
+			log.info(`Backup sob demanda concluido em "${node.label}": ${result.backup.file} (${size})`);
+			notifyBackup('Backup concluído', `${result.backup.file} (${size}) em ${node.label}`);
+		} else {
+			log.error(`Backup sob demanda falhou em "${node.label}":`, result.error);
+			notifyBackup('Backup falhou', String(result.error || '').slice(0, 200));
+		}
+		return result;
+	} catch (error) {
+		log.error('backup-now falhou:', error.message);
+		notifyBackup('Backup falhou', error.message.slice(0, 200));
+		return { success: false, error: error.message };
+	} finally {
+		backupRunning = false;
+		sendBackupState({ running: false });
 	}
 });
 

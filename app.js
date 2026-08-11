@@ -62,10 +62,14 @@ function initStatusListener() {
         window.api.onAppNotice(showAppNotice);
     }
     if (typeof window.api !== 'undefined' && window.api.onNodeChanged) {
-        window.api.onNodeChanged(() => refreshNodes());
+        window.api.onNodeChanged(() => { refreshNodes(); loadBackupStatus(); });
+    }
+    if (typeof window.api !== 'undefined' && window.api.onBackupState) {
+        window.api.onBackupState(onBackupState);
     }
     refreshNodes();
     loadStack();
+    loadBackupStatus();
 }
 
 // ============ NÓS (local x Raspberry) ============
@@ -231,6 +235,116 @@ function showAppNotice(notice) {
     }
     el.textContent = '⚠ ' + notice.text;
 }
+
+// ============ BACKUP DO BANCO ============
+// O timer do Pi roda de 30 em 30 min; aqui e o "agora". O painel mostra o
+// ultimo dump do NO ATIVO — trocar de no re-carrega, porque /workspace/
+// db-backups do Pi e do local sao pastas diferentes.
+let backupBusy = false;
+// Guarda o ultimo status conhecido pra re-renderizar durante o backup sem
+// apagar a informacao do painel (e sem mentir "indisponivel" enquanto roda).
+let lastBackupStatus = null;
+
+function formatBytes(bytes) {
+    if (!Number.isFinite(bytes)) return '?';
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ['KB', 'MB', 'GB'];
+    let value = bytes / 1024;
+    let i = 0;
+    while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+    return `${value.toFixed(1)} ${units[i]}`;
+}
+
+// "há 5 min" comunica frescor melhor que timestamp absoluto — a pergunta real
+// e "meu ultimo ponto de restauracao e recente?", nao "que horas eram".
+function formatAge(mtime) {
+    const mins = Math.floor((Date.now() - mtime) / 60000);
+    if (mins < 1) return 'agora mesmo';
+    if (mins < 60) return `há ${mins} min`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `há ${hours}h`;
+    return `há ${Math.floor(hours / 24)}d`;
+}
+
+function renderBackupPanel(status) {
+    const el = document.getElementById('backupPanel');
+    if (!el) return;
+
+    if (status !== undefined) lastBackupStatus = status;
+    status = lastBackupStatus;
+
+    const node = activeNodeInfo();
+    const nodeLabel = escapeHtml((node && node.label) || 'Local');
+
+    let info;
+    if (!status || !status.available) {
+        info = '<span class="text-muted small">Indisponível (container parado?)</span>';
+    } else if (!status.latest) {
+        info = '<span class="text-muted small">Nenhum backup ainda</span>';
+    } else {
+        const l = status.latest;
+        info = `<span class="small"><i class="fas fa-database me-2" style="opacity:.6"></i>`
+            + `${escapeHtml(l.file)}</span>`
+            + `<span class="text-muted small ms-2">${formatBytes(l.size)} · ${formatAge(l.mtime)}`
+            + ` · ${status.count} no total</span>`;
+    }
+
+    const label = backupBusy
+        ? '<span class="spinner-border spinner-border-sm me-2"></span>Fazendo backup...'
+        : '<i class="fas fa-download me-2"></i>Backup agora';
+
+    el.innerHTML = `
+        <div class="d-flex flex-wrap align-items-center justify-content-center gap-3"
+             style="background:rgba(127,127,127,.12);border:1px solid rgba(127,127,127,.25);border-radius:12px;padding:12px 18px">
+            <div class="d-flex flex-column">
+                <span class="text-muted text-uppercase" style="font-size:11px;letter-spacing:.5px">${nodeLabel}</span>
+                <div>${info}</div>
+            </div>
+            <button id="backupNowBtn" class="btn btn-sm btn-outline-primary" ${backupBusy ? 'disabled' : ''}>
+                ${label}
+            </button>
+        </div>`;
+}
+
+async function loadBackupStatus() {
+    if (typeof window.api === 'undefined' || !window.api.getBackupStatus) return;
+    try {
+        renderBackupPanel(await window.api.getBackupStatus());
+    } catch {
+        renderBackupPanel(null);
+    }
+}
+
+// Empurrado pelo main.js: cobre o caso do backup ter sido disparado de outra
+// janela, e mantem o botao coerente se a chamada demorar.
+function onBackupState(state) {
+    backupBusy = !!(state && state.running);
+    if (backupBusy) renderBackupPanel(); else loadBackupStatus();
+}
+
+async function backupNow() {
+    if (backupBusy || typeof window.api === 'undefined' || !window.api.backupNow) return;
+    backupBusy = true;
+    renderBackupPanel();
+    try {
+        const result = await window.api.backupNow();
+        if (!result || !result.success) {
+            showAppNotice({ text: `Backup: ${(result && result.error) || 'falhou'}` });
+        } else {
+            showAppNotice(null);
+        }
+    } finally {
+        backupBusy = false;
+        await loadBackupStatus();
+    }
+}
+
+document.addEventListener('click', (event) => {
+    if (event.target.closest('#backupNowBtn')) {
+        event.preventDefault();
+        backupNow();
+    }
+});
 
 // Painel "Stack instalado": linguagens / ferramentas / servidores + versoes.
 function loadStack() {

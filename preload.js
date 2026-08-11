@@ -69,6 +69,16 @@ contextBridge.exposeInMainWorld('api', {
     onNodeChanged: (callback) => {
         ipcRenderer.on('node-changed', (event, node) => callback(node));
     },
+    // Backup do banco sob demanda
+    backupNow: () => {
+        return ipcRenderer.invoke('backup-now');
+    },
+    getBackupStatus: () => {
+        return ipcRenderer.invoke('get-backup-status');
+    },
+    onBackupState: (callback) => {
+        ipcRenderer.on('backup-state', (event, state) => callback(state));
+    },
     // DevTools toggle
     toggleDevTools: () => {
         ipcRenderer.send('toggle-devtools');
