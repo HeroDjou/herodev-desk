@@ -1,9 +1,23 @@
-const { FusesPlugin } = require('@electron-forge/plugin-fuses');
-const { FuseV1Options, FuseVersion } = require('@electron/fuses');
-
+// Config ÚNICA do Electron Forge.
+//
+// Ela morava duplicada: um bloco "config.forge" no package.json e este arquivo.
+// O Forge lê o package.json PRIMEIRO e só cai neste arquivo se aquele não
+// existir (@electron-forge/core, util/forge-config.js), então tudo daqui era
+// ignorado em silêncio — inclusive o `asar: true` que o main.js comenta como
+// se estivesse ativo. Agora o package.json não tem mais "config.forge" e este
+// é o único lugar.
 module.exports = {
   packagerConfig: {
     asar: true,
+    appCopyright: 'Copyright © 2026 HeroDjou',
+    appBundleId: 'com.herodjou.herodev-desk',
+    appCategoryType: 'public.app-category.developer-tools',
+    win32metadata: {
+      CompanyName: 'HeroDjou',
+      ProductName: 'HeroDev Desktop',
+      FileDescription: 'HeroDev Desktop',
+      OriginalFilename: 'herodev-desk.exe',
+    },
   },
   rebuildConfig: {},
   makers: [
@@ -29,16 +43,9 @@ module.exports = {
       name: '@electron-forge/plugin-auto-unpack-natives',
       config: {},
     },
-    // Fuses are used to enable/disable various Electron functionality
-    // at package time, before code signing the application
-    new FusesPlugin({
-      version: FuseVersion.V1,
-      [FuseV1Options.RunAsNode]: false,
-      [FuseV1Options.EnableCookieEncryption]: true,
-      [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
-      [FuseV1Options.EnableNodeCliInspectArguments]: false,
-      [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
-      [FuseV1Options.OnlyLoadAppFromAsar]: true,
-    }),
+    // Sem FusesPlugin de propósito: este pipeline empacota builds darwin/win32
+    // NÃO assinadas de dentro do container Linux, e o fuse de integridade do
+    // asar em app macOS sem assinatura é caminho conhecido pra "o app não
+    // abre". Mexer nos fuses aqui exigiria assinar o bundle antes.
   ],
 };

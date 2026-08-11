@@ -134,6 +134,13 @@ body.has-tabs #mainContent {
     height: 48px;
 }
 
+/* Servico sem SVG proprio (ex.: Terminal) usa icone de fonte no mesmo box. */
+i.service-icon {
+    font-size: 40px;
+    line-height: 48px;
+    text-align: center;
+}
+
 .card-footer {
     background-color: #f8f9fa;
     border-top: 1px solid #dee2e6;

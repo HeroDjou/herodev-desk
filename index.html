@@ -23,187 +23,13 @@
         <div id="cardsContainer">
             <h1 class="text-center mb-4 h3">Central de serviços HeroDev</h1>
             
-            <div class="row row-cols-2 row-cols-md-3 row-cols-lg-6 g-3">
-            <div class="col">
-                <div class="card h-100">
-                    <div class="card-body text-center py-3">
-                        <img src="assets/icons/localhost.svg" alt="Localhost" class="service-icon mx-auto d-block mb-2">
-                        <h6 class="card-title mb-0 small">localhost</h6>
-                    </div>
-                    <div class="card-footer d-flex justify-content-around p-2">
-                        <button class="btn btn-sm btn-outline-primary action-btn" onclick="openService('http://localhost:8080', 'window', 'localhost')" title="Nova janela">
-                            <i class="fas fa-window-maximize"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary action-btn" onclick="openService('http://localhost:8080', 'tab', 'localhost')" title="Nova aba">
-                            <i class="fas fa-folder-plus"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-info action-btn" onclick="openService('http://localhost:8080', 'browser', 'localhost')" title="Navegador">
-                            <i class="fas fa-external-link-alt"></i>
-                        </button>
-                    </div>
-                </div>
+            <!-- Cards gerados em runtime a partir de config.services (app.js):
+                 a URL de cada servico depende do no ativo (local x Raspberry),
+                 entao duplicar isso em HTML estatico deixaria os dois fora de
+                 sincronia na primeira troca de no. -->
+            <div class="row row-cols-2 row-cols-md-3 row-cols-lg-6 g-3" id="serviceCards">
+                <div class="col-12 text-center text-muted small">Carregando serviços...</div>
             </div>
-
-            <div class="col">
-                <div class="card h-100">
-                    <div class="card-body text-center py-3">
-                        <img src="assets/icons/phpmyadmin.svg" alt="phpMyAdmin" class="service-icon mx-auto d-block mb-2">
-                        <h6 class="card-title mb-0 small">phpMyAdmin</h6>
-                    </div>
-                    <div class="card-footer d-flex justify-content-around p-2">
-                        <button class="btn btn-sm btn-outline-primary action-btn" onclick="openService('http://localhost:8080/phpmyadmin', 'window', 'phpMyAdmin')" title="Nova janela">
-                            <i class="fas fa-window-maximize"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary action-btn" onclick="openService('http://localhost:8080/phpmyadmin', 'tab', 'phpMyAdmin')" title="Nova aba">
-                            <i class="fas fa-folder-plus"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-info action-btn" onclick="openService('http://localhost:8080/phpmyadmin', 'browser', 'phpMyAdmin')" title="Navegador">
-                            <i class="fas fa-external-link-alt"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col">
-                <div class="card h-100">
-                    <div class="card-body text-center py-3">
-                        <img src="assets/icons/vscode.svg" alt="VSCode" class="service-icon mx-auto d-block mb-2">
-                        <h6 class="card-title mb-0 small">VSCode</h6>
-                    </div>
-                    <div class="card-footer d-flex justify-content-around p-2">
-                        <button class="btn btn-sm btn-outline-primary action-btn" onclick="openService('http://localhost:12777', 'window', 'VSCode')" title="Nova janela">
-                            <i class="fas fa-window-maximize"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary action-btn" onclick="openService('http://localhost:12777', 'tab', 'VSCode')" title="Nova aba">
-                            <i class="fas fa-folder-plus"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-info action-btn" onclick="openService('http://localhost:12777', 'browser', 'VSCode')" title="Navegador">
-                            <i class="fas fa-external-link-alt"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col">
-                <div class="card h-100">
-                    <div class="card-body text-center py-3">
-                        <img src="assets/icons/disquete.svg" alt="Arquivos" class="service-icon mx-auto d-block mb-2">
-                        <h6 class="card-title mb-0 small">Arquivos</h6>
-                    </div>
-                    <div class="card-footer d-flex justify-content-around p-2">
-                        <button class="btn btn-sm btn-outline-primary action-btn" onclick="openService('http://localhost:8081', 'window', 'Arquivos')" title="Nova janela">
-                            <i class="fas fa-window-maximize"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary action-btn" onclick="openService('http://localhost:8081', 'tab', 'Arquivos')" title="Nova aba">
-                            <i class="fas fa-folder-plus"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-info action-btn" onclick="openService('http://localhost:8081', 'browser', 'Arquivos')" title="Navegador">
-                            <i class="fas fa-external-link-alt"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col">
-                <div class="card h-100">
-                    <div class="card-body text-center py-3">
-                        <img src="assets/icons/mongodb.svg" alt="MongoDB" class="service-icon mx-auto d-block mb-2">
-                        <h6 class="card-title mb-0 small">Mongo UI</h6>
-                    </div>
-                    <div class="card-footer d-flex justify-content-around p-2">
-                        <button class="btn btn-sm btn-outline-primary action-btn" onclick="openService('http://localhost:8082', 'window', 'Mongo UI')" title="Nova janela">
-                            <i class="fas fa-window-maximize"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary action-btn" onclick="openService('http://localhost:8082', 'tab', 'Mongo UI')" title="Nova aba">
-                            <i class="fas fa-folder-plus"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-info action-btn" onclick="openService('http://localhost:8082', 'browser', 'Mongo UI')" title="Navegador">
-                            <i class="fas fa-external-link-alt"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col">
-                <div class="card h-100">
-                    <div class="card-body text-center py-3">
-                        <img src="assets/icons/nginx.svg" alt="NGINX" class="service-icon mx-auto d-block mb-2">
-                        <h6 class="card-title mb-0 small">NGINX</h6>
-                    </div>
-                    <div class="card-footer d-flex justify-content-around p-2">
-                        <button class="btn btn-sm btn-outline-primary action-btn" onclick="openService('http://localhost:8083', 'window', 'NGINX')" title="Nova janela">
-                            <i class="fas fa-window-maximize"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary action-btn" onclick="openService('http://localhost:8083', 'tab', 'NGINX')" title="Nova aba">
-                            <i class="fas fa-folder-plus"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-info action-btn" onclick="openService('http://localhost:8083', 'browser', 'NGINX')" title="Navegador">
-                            <i class="fas fa-external-link-alt"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col">
-                <div class="card h-100">
-                    <div class="card-body text-center py-3">
-                        <img src="assets/icons/prometheus.svg" alt="Prometheus" class="service-icon mx-auto d-block mb-2">
-                        <h6 class="card-title mb-0 small">Prometheus</h6>
-                    </div>
-                    <div class="card-footer d-flex justify-content-around p-2">
-                        <button class="btn btn-sm btn-outline-primary action-btn" onclick="openService('http://localhost:9090', 'window', 'Prometheus')" title="Nova janela">
-                            <i class="fas fa-window-maximize"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary action-btn" onclick="openService('http://localhost:9090', 'tab', 'Prometheus')" title="Nova aba">
-                            <i class="fas fa-folder-plus"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-info action-btn" onclick="openService('http://localhost:9090', 'browser', 'Prometheus')" title="Navegador">
-                            <i class="fas fa-external-link-alt"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col">
-                <div class="card h-100">
-                    <div class="card-body text-center py-3">
-                        <img src="assets/icons/grafana.svg" alt="Grafana" class="service-icon mx-auto d-block mb-2">
-                        <h6 class="card-title mb-0 small">Grafana</h6>
-                    </div>
-                    <div class="card-footer d-flex justify-content-around p-2">
-                        <button class="btn btn-sm btn-outline-primary action-btn" onclick="openService('http://localhost:3000', 'window', 'Grafana')" title="Nova janela">
-                            <i class="fas fa-window-maximize"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary action-btn" onclick="openService('http://localhost:3000', 'tab', 'Grafana')" title="Nova aba">
-                            <i class="fas fa-folder-plus"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-info action-btn" onclick="openService('http://localhost:3000', 'browser', 'Grafana')" title="Navegador">
-                            <i class="fas fa-external-link-alt"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col">
-                <div class="card h-100">
-                    <div class="card-body text-center py-3">
-                        <img src="assets/icons/mailpit.svg" alt="Mailpit" class="service-icon mx-auto d-block mb-2">
-                        <h6 class="card-title mb-0 small">Mailpit</h6>
-                    </div>
-                    <div class="card-footer d-flex justify-content-around p-2">
-                        <button class="btn btn-sm btn-outline-primary action-btn" onclick="openService('http://localhost:8080/mailpit', 'window', 'Mailpit')" title="Nova janela">
-                            <i class="fas fa-window-maximize"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary action-btn" onclick="openService('http://localhost:8080/mailpit', 'tab', 'Mailpit')" title="Nova aba">
-                            <i class="fas fa-folder-plus"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-info action-btn" onclick="openService('http://localhost:8080/mailpit', 'browser', 'Mailpit')" title="Navegador">
-                            <i class="fas fa-external-link-alt"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
 
             <h2 class="h5 text-center mt-5 mb-3">Stack instalado</h2>
             <div id="stackContainer" class="d-flex flex-column align-items-center gap-3 pb-4">
@@ -219,7 +45,8 @@
                     <span class="text-muted small">Carregando...</span>
                 </div>
                 <div class="d-flex align-items-center gap-2">
-                    <span class="text-muted small">HeroDev v1.0.0</span>
+                    <span id="nodeIndicator" class="text-muted small"></span>
+                    <span class="text-muted small">HeroDev v1.1.0</span>
                 </div>
             </div>
         </div>

@@ -4,6 +4,8 @@ const services = require('./services');
 
 let tray = null;
 let mainWindow = null;
+// Acoes que so o main.js sabe fazer (trocar de no, abrir terminal do host).
+let actions = {};
 
 function createTrayIcon(isRunning = true) {
     const size = 16;
@@ -37,9 +39,10 @@ function createTrayIcon(isRunning = true) {
     return nativeImage.createFromBuffer(canvas, { width: size, height: size });
 }
 
-function createTray(window) {
+function createTray(window, trayActions = {}) {
     mainWindow = window;
-    
+    actions = trayActions;
+
     const icon = createTrayIcon(false);
     
     tray = new Tray(icon);
@@ -66,9 +69,20 @@ async function updateTrayMenu(statusArg) {
 
     if (!tray || (tray.isDestroyed && tray.isDestroyed())) return;
 
+    const node = status.node || services.getNode();
+
     tray.setImage(createTrayIcon(status.containerRunning));
-    tray.setToolTip(`HeroDev - ${status.containerRunning ? 'Ativo' : 'Parado'}`);
-    
+    tray.setToolTip(`HeroDev (${node.label}) - ${status.containerRunning ? 'Ativo' : 'Parado'}`);
+
+    // Seletor de no: alterna entre o container desta maquina e o do Raspberry.
+    const nodes = actions.getNodes ? actions.getNodes() : {};
+    const nodeMenuItems = Object.entries(nodes).map(([id, info]) => ({
+        label: info.label || id,
+        type: 'radio',
+        checked: id === node.id,
+        click: () => { if (id !== node.id && actions.switchNode) actions.switchNode(id); }
+    }));
+
     const serviceMenuItems = Object.entries(status.services || {})
         .filter(([_, info]) => info.installed !== false)
         .map(([service, info]) => ({
@@ -98,7 +112,7 @@ async function updateTrayMenu(statusArg) {
     
     const contextMenu = Menu.buildFromTemplate([
         {
-            label: `HeroDev ${status.containerRunning ? '(Rodando)' : '(Parado)'}`,
+            label: `HeroDev - ${node.label} ${status.containerRunning ? '(Rodando)' : '(Parado)'}`,
             enabled: false
         },
         { type: 'separator' },
@@ -111,7 +125,16 @@ async function updateTrayMenu(statusArg) {
                 }
             }
         },
+        {
+            label: 'Abrir terminal do container',
+            enabled: status.containerRunning,
+            click: () => { if (actions.openTerminal) actions.openTerminal(); }
+        },
         { type: 'separator' },
+        {
+            label: 'Nó',
+            submenu: nodeMenuItems.length > 0 ? nodeMenuItems : [{ label: 'Nenhum configurado', enabled: false }]
+        },
         {
             label: 'Serviços',
             submenu: serviceMenuItems.length > 0 ? serviceMenuItems : [{ label: 'Nenhum disponível', enabled: false }]

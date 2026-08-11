@@ -53,6 +53,22 @@ contextBridge.exposeInMainWorld('api', {
     saveConfig: (config) => {
         return ipcRenderer.invoke('save-config', config);
     },
+    // Nos (local x Raspberry), terminal e tunel
+    getNodes: () => {
+        return ipcRenderer.invoke('get-nodes');
+    },
+    setActiveNode: (nodeId) => {
+        return ipcRenderer.invoke('set-active-node', nodeId);
+    },
+    openTerminal: () => {
+        return ipcRenderer.invoke('open-terminal');
+    },
+    tunnelToggle: (enabled) => {
+        return ipcRenderer.invoke('tunnel-toggle', enabled);
+    },
+    onNodeChanged: (callback) => {
+        ipcRenderer.on('node-changed', (event, node) => callback(node));
+    },
     // DevTools toggle
     toggleDevTools: () => {
         ipcRenderer.send('toggle-devtools');

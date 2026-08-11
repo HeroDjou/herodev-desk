@@ -9,6 +9,7 @@ const {
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 const log = require('./logger');
 const services = require('./services');
 const { createTray, updateTrayMenu, destroyTray } = require('./tray');
@@ -23,6 +24,7 @@ let memInterval = null;
 let memWarned = false;
 let isHandlingFatal = false;    // evita reentrancia no handler fatal
 let recoverState = { tries: 0, nextAt: 0, running: false };
+let tunnelProc = null;          // processo do tunel SSH, quando ligado
 
 const TAB_BAR_HEIGHT = 42;
 
@@ -35,9 +37,53 @@ try {
 	if (!fs.existsSync(CONFIG_PATH) && fs.existsSync(BUNDLED_CONFIG_PATH)) {
 		fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
 		fs.copyFileSync(BUNDLED_CONFIG_PATH, CONFIG_PATH);
+	} else {
+		seedMissingConfigKeys();
 	}
 } catch (e) {
 	CONFIG_PATH = BUNDLED_CONFIG_PATH;
+}
+
+// A copia em userData e semeada UMA vez e depois nunca mais tocada — entao
+// quem ja usava o app antes desta versao ficaria sem os "nodes" e sem o
+// servico "terminal", e a funcionalidade simplesmente nao apareceria. Aqui a
+// gente completa o que falta a partir do bundle, sem sobrescrever nada que o
+// usuario ja tenha ajustado (senhas, URLs, servicos desabilitados).
+function seedMissingConfigKeys() {
+	if (!fs.existsSync(BUNDLED_CONFIG_PATH) || !fs.existsSync(CONFIG_PATH)) return;
+	let bundled, user;
+	try {
+		bundled = JSON.parse(fs.readFileSync(BUNDLED_CONFIG_PATH, 'utf8').replace(/^﻿/, ''));
+		user = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^﻿/, ''));
+	} catch (e) {
+		log.warn('Nao foi possivel migrar o config do usuario:', e.message);
+		return;
+	}
+
+	let changed = false;
+	for (const [key, value] of Object.entries(bundled)) {
+		if (key === 'services') continue;
+		if (user[key] === undefined) { user[key] = value; changed = true; }
+	}
+	if (bundled.services) {
+		user.services = user.services || {};
+		for (const [key, service] of Object.entries(bundled.services)) {
+			if (user.services[key] === undefined) { user.services[key] = service; changed = true; }
+			// "icon" e novo: sem ele o card do servico ficaria sem imagem.
+			else if (user.services[key] && !user.services[key].icon && service.icon) {
+				user.services[key].icon = service.icon;
+				changed = true;
+			}
+		}
+	}
+
+	if (!changed) return;
+	try {
+		fs.writeFileSync(CONFIG_PATH, JSON.stringify(user, null, 4), 'utf8');
+		log.info('Config do usuario atualizado com as chaves novas do bundle.');
+	} catch (e) {
+		log.warn('Falha ao gravar config migrado:', e.message);
+	}
 }
 
 // ============================================================
@@ -191,10 +237,76 @@ function normalizeUrl(rawUrl) {
 	}
 }
 
-function isLocalServiceUrl(rawUrl) {
+// ============================================================
+// Nos: local (esta maquina) x Raspberry Pi
+//
+// O config.json guarda as URLs dos servicos sempre em "localhost". O host
+// real vem do no ativo: trocar de no reescreve so o hostname, preservando
+// porta e path. Com tunel SSH ligado o host CONTINUA localhost de proposito
+// — e o ponto do tunel (docs/herodev-develop-anywhere.md secao 5.3): projetos
+// com URL fixa em localhost:8080 (WordPress etc.) seguem funcionando.
+// ============================================================
+const DEFAULT_NODES = {
+	local: { label: 'Local', podmanConnection: '', host: 'localhost', tunnel: null }
+};
+
+function getNodes() {
+	const config = loadConfig() || {};
+	const nodes = (config.nodes && typeof config.nodes === 'object') ? config.nodes : DEFAULT_NODES;
+	return Object.keys(nodes).length ? nodes : DEFAULT_NODES;
+}
+
+function getActiveNodeId() {
+	const config = loadConfig() || {};
+	const nodes = getNodes();
+	const wanted = config.activeNode;
+	if (wanted && nodes[wanted]) return wanted;
+	return Object.keys(nodes)[0];
+}
+
+function getActiveNode() {
+	const id = getActiveNodeId();
+	const node = getNodes()[id] || DEFAULT_NODES.local;
+	return { id, ...node };
+}
+
+// Host que a UI deve usar nas URLs. Com tunel ligado, localhost.
+function activeUrlHost() {
+	const node = getActiveNode();
+	if (node.tunnel && node.tunnel.enabled) return 'localhost';
+	return node.host || 'localhost';
+}
+
+function resolveServiceUrl(rawUrl) {
 	try {
 		const parsed = new URL(rawUrl);
-		return ['localhost', '127.0.0.1'].includes(parsed.hostname);
+		parsed.hostname = activeUrlHost();
+		return parsed.toString().replace(/\/$/, '');
+	} catch {
+		return rawUrl;
+	}
+}
+
+function applyActiveNode() {
+	const node = getActiveNode();
+	services.setNode({
+		id: node.id,
+		label: node.label,
+		podmanConnection: node.podmanConnection,
+		host: node.host
+	});
+	return node;
+}
+
+// AutoLogin so em servico do HeroDev: localhost, 127.0.0.1 ou o host do no
+// ativo. Sem incluir o host do no, apontar pro Pi mataria o autologin.
+function isManagedServiceUrl(rawUrl) {
+	try {
+		const parsed = new URL(rawUrl);
+		const allowed = new Set(['localhost', '127.0.0.1', activeUrlHost()]);
+		const node = getActiveNode();
+		if (node.host) allowed.add(node.host);
+		return allowed.has(parsed.hostname);
 	} catch {
 		return false;
 	}
@@ -205,9 +317,14 @@ function resolveServiceConfig(url, serviceName) {
 	if (!config || !config.services) return null;
 
 	const entries = Object.entries(config.services);
+	// Compara sempre com a URL ja resolvida pro no ativo: o config guarda
+	// localhost, mas a aba pode ter sido aberta em herodev.local.
 	const targetUrl = normalizeUrl(url);
 
-	let match = entries.find(([_, service]) => normalizeUrl(service?.url || '') === targetUrl);
+	let match = entries.find(([_, service]) => normalizeUrl(resolveServiceUrl(service?.url || '')) === targetUrl);
+	if (!match) {
+		match = entries.find(([_, service]) => normalizeUrl(service?.url || '') === targetUrl);
+	}
 	if (!match && serviceName) {
 		const targetName = String(serviceName).trim().toLowerCase();
 		match = entries.find(([key, service]) => {
@@ -305,7 +422,7 @@ function buildAutoLoginScript({ username, password, shouldTrySkip, shouldAutoSub
 function setupHttpBasicAutoLogin(webContents, url, serviceName) {
 	const resolved = resolveServiceConfig(url, serviceName);
 	if (!resolved || !resolved.service || !resolved.service.autoLogin) return;
-	if (!isLocalServiceUrl(url)) return;
+	if (!isManagedServiceUrl(url)) return;
 
 	const credentials = resolved.service.credentials || {};
 	const username = String(credentials.username || '');
@@ -326,7 +443,7 @@ function setupHttpBasicAutoLogin(webContents, url, serviceName) {
 function setupAutoLogin(webContents, url, serviceName) {
 	const resolved = resolveServiceConfig(url, serviceName);
 	if (!resolved || !resolved.service || !resolved.service.autoLogin) return;
-	if (!isLocalServiceUrl(url)) return;
+	if (!isManagedServiceUrl(url)) return;
 
 	setupHttpBasicAutoLogin(webContents, url, serviceName);
 
@@ -354,6 +471,11 @@ function setupAutoLogin(webContents, url, serviceName) {
 }
 
 function createWindow() {
+	// Antes de qualquer polling: aponta o services.js pro no gravado na config
+	// (e religa o tunel, se ele estava ligado quando o app foi fechado).
+	const node = applyActiveNode();
+	if (node.tunnel && node.tunnel.enabled) startTunnel(node);
+
 	mainWindow = new BaseWindow({
 		autoHideMenuBar: true,
 		width: 1400,
@@ -400,7 +522,11 @@ function createWindow() {
 		stopStatusPolling();
 	});
 
-	createTray(mainWindow);
+	createTray(mainWindow, {
+		getNodes,
+		switchNode: (id) => { switchNode(id).catch(e => log.error('switchNode (tray):', e.message)); },
+		openTerminal: openHostTerminal
+	});
 }
 
 function startStatusPolling() {
@@ -462,6 +588,15 @@ function onStatusObserved(status) {
 	if (status && status.containerRunning) {
 		if (recoverState.tries !== 0) setStatusDegraded('');
 		recoverState = { tries: 0, nextAt: 0, running: false };
+		return;
+	}
+	// Em no remoto, "container parado" quase sempre quer dizer "Pi desligado
+	// ou fora da rede". Tentar `podman --connection pi start` em loop nao
+	// resolve nada e ainda gasta o timeout de cada ciclo de polling — avisa e
+	// deixa o usuario decidir (ligar o Pi, voltar pro no local).
+	if (services.isRemote()) {
+		const node = services.getNode();
+		setStatusDegraded(`No "${node.label}" inacessivel - Pi desligado, fora da rede ou sem a conexao podman configurada.`);
 		return;
 	}
 	if (recoverState.running || Date.now() < recoverState.nextAt) return;
@@ -645,9 +780,176 @@ function ensureHomeTab() {
 	}
 }
 
+// ============================================================
+// Terminal do container no terminal do HOST
+//
+// Complementa o terminal embutido (ttyd, aberto como aba): funciona mesmo
+// quando o ttyd nao esta na imagem, e da um shell de verdade com o histor./
+// clipboard do terminal nativo. Respeita o no ativo — no no "Raspberry Pi" o
+// `podman --connection pi exec -it` abre um shell DENTRO do container do Pi.
+// ============================================================
+function openHostTerminal() {
+	const cmd = services.interactiveShellCommand();
+	log.info(`Abrindo terminal do host: ${cmd}`);
+
+	if (process.platform === 'darwin') {
+		// Escape pro literal de string do AppleScript.
+		const applescriptCmd = cmd.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+		const useITerm = fs.existsSync('/Applications/iTerm.app');
+		const script = useITerm
+			? `tell application "iTerm"
+					activate
+					set newWindow to (create window with default profile)
+					tell current session of newWindow to write text "${applescriptCmd}"
+				end tell`
+			: `tell application "Terminal"
+					activate
+					do script "${applescriptCmd}"
+				end tell`;
+		const proc = spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' });
+		proc.on('error', (e) => log.error('Falha ao abrir terminal do host:', e.message));
+		proc.unref();
+		return { success: true };
+	}
+
+	if (process.platform === 'win32') {
+		const proc = spawn('cmd.exe', ['/c', 'start', 'HeroDev Terminal', 'cmd', '/k', cmd], {
+			detached: true, stdio: 'ignore', windowsVerbatimArguments: true
+		});
+		proc.on('error', (e) => log.error('Falha ao abrir terminal do host:', e.message));
+		proc.unref();
+		return { success: true };
+	}
+
+	// Linux: tenta os emuladores mais comuns, na ordem.
+	for (const term of ['x-terminal-emulator', 'gnome-terminal', 'konsole', 'xterm']) {
+		try {
+			const proc = spawn(term, ['-e', 'bash', '-lc', `${cmd}; exec bash`], { detached: true, stdio: 'ignore' });
+			proc.unref();
+			return { success: true };
+		} catch { /* tenta o proximo */ }
+	}
+	return { success: false, error: 'Nenhum emulador de terminal encontrado.' };
+}
+
+// ============================================================
+// Tunel SSH pro Pi
+//
+// Reusa os scripts que ja existem no repo (_mac/mac_tunnel-herodev.sh,
+// _win/win_tunnel-herodev.ps1). Achamos a raiz do repo subindo a partir do
+// app: tanto em dev (volumes/workspace/herodev-desk) quanto empacotado
+// (…/out/…/herodev-desk.app/Contents/Resources/app) ela esta acima.
+// ============================================================
+function findRepoRoot() {
+	let dir = app.getAppPath();
+	for (let i = 0; i < 10; i++) {
+		if (fs.existsSync(path.join(dir, 'herodev.conf')) && fs.existsSync(path.join(dir, '_mac'))) return dir;
+		const parent = path.dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return null;
+}
+
+function stopTunnel() {
+	if (!tunnelProc) return;
+	try {
+		// detached: mata o grupo inteiro (o ssh/autossh filho junto).
+		if (process.platform === 'win32') tunnelProc.kill();
+		else process.kill(-tunnelProc.pid, 'SIGTERM');
+		log.info('Tunel SSH encerrado.');
+	} catch (e) {
+		log.warn('Falha ao encerrar tunel:', e.message);
+	}
+	tunnelProc = null;
+}
+
+function startTunnel(node) {
+	stopTunnel();
+	const root = findRepoRoot();
+	if (!root) return { success: false, error: 'Raiz do repo herodev-container nao encontrada a partir do app.' };
+
+	const sshTarget = (node.tunnel && node.tunnel.sshTarget) || '';
+	const script = process.platform === 'win32'
+		? path.join(root, '_win', 'win_tunnel-herodev.ps1')
+		: path.join(root, '_mac', 'mac_tunnel-herodev.sh');
+	if (!fs.existsSync(script)) return { success: false, error: `Script de tunel nao encontrado: ${script}` };
+
+	try {
+		tunnelProc = process.platform === 'win32'
+			? spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-PiHost', sshTarget],
+				{ detached: true, stdio: 'ignore' })
+			: spawn('bash', [script, sshTarget], { detached: true, stdio: 'ignore' });
+
+		tunnelProc.on('error', (e) => {
+			log.error('Tunel SSH falhou:', e.message);
+			setStatusDegraded(`Tunel SSH falhou: ${e.message}`);
+			tunnelProc = null;
+		});
+		tunnelProc.on('exit', (code) => {
+			log.warn(`Tunel SSH saiu (codigo ${code}).`);
+			tunnelProc = null;
+		});
+		tunnelProc.unref();
+		log.info(`Tunel SSH iniciado pro ${sshTarget}.`);
+		return { success: true };
+	} catch (e) {
+		tunnelProc = null;
+		return { success: false, error: e.message };
+	}
+}
+
+// Troca de no: fecha as abas (as URLs mudam de host), liga/desliga o tunel,
+// aponta o services.js pra nova conexao e forca um ciclo de status.
+async function switchNode(nodeId) {
+	const nodes = getNodes();
+	if (!nodes[nodeId]) return { success: false, error: `No desconhecido: ${nodeId}` };
+
+	const config = loadConfig() || {};
+	config.activeNode = nodeId;
+	saveConfig(config);
+
+	closeAllTabs();
+
+	const node = applyActiveNode();
+	if (node.tunnel && node.tunnel.enabled) startTunnel(node);
+	else stopTunnel();
+
+	setStatusDegraded('');
+	recoverState = { tries: 0, nextAt: 0, running: false };
+	notifyNodeChanged();
+	await pollOnce();
+	return { success: true, node };
+}
+
+function notifyNodeChanged() {
+	if (!mainView || mainView.webContents.isDestroyed()) return;
+	const node = getActiveNode();
+	mainView.webContents.send('node-changed', {
+		id: node.id,
+		label: node.label,
+		urlHost: activeUrlHost(),
+		tunnel: node.tunnel || null
+	});
+}
+
+function closeAllTabs() {
+	const tabIds = Array.from(tabs.keys());
+	tabIds.forEach(id => { if (id !== HOME_TAB_ID) closeTab(id); });
+	if (tabs.size === 1 && tabs.has(HOME_TAB_ID)) {
+		tabs.delete(HOME_TAB_ID);
+		activeTabId = null;
+		if (mainView && !mainView.webContents.isDestroyed()) {
+			mainView.webContents.send('home-visibility', true);
+		}
+		notifyTabsUpdate();
+	}
+}
+
 ipcMain.on('open-service', (event, { url, openType, serviceName }) => {
+	url = resolveServiceUrl(url);
 	const title = serviceName || getServiceNameFromUrl(url);
-	
+
 	if (openType === 'window') {
 		const serviceWindow = new BaseWindow({
 			width: 1920,
@@ -686,8 +988,10 @@ function getServiceNameFromUrl(url) {
 	try {
 		const urlObj = new URL(url);
 		const port = urlObj.port;
+		const byPath = { phpmyadmin: 'phpMyAdmin', mailpit: 'Mailpit', terminal: 'Terminal' };
+		const hit = Object.keys(byPath).find(p => urlObj.pathname.includes(p));
 		const portToName = {
-			'8080': urlObj.pathname.includes('phpmyadmin') ? 'phpMyAdmin' : 'localhost',
+			'8080': hit ? byPath[hit] : 'localhost',
 			'12777': 'VSCode',
 			'8081': 'Arquivos',
 			'8082': 'Mongo UI',
@@ -710,24 +1014,59 @@ ipcMain.on('tab-close', (event, tabId) => {
 });
 
 ipcMain.on('tab-close-all', () => {
-	// Fechar todas as abas exceto a Home
-	const tabIds = Array.from(tabs.keys());
-	tabIds.forEach(id => {
-		if (id !== HOME_TAB_ID) {
-			closeTab(id);
-		}
-	});
-	// Se só sobrou a Home, remover ela também
-	if (tabs.size === 1 && tabs.has(HOME_TAB_ID)) {
-		tabs.delete(HOME_TAB_ID);
-		activeTabId = null;
-		mainView.webContents.send('home-visibility', true);
-		notifyTabsUpdate();
-	}
+	closeAllTabs();
 });
 
 ipcMain.on('open-external', (event, url) => {
-	shell.openExternal(url);
+	shell.openExternal(resolveServiceUrl(url));
+});
+
+// ---- Nos, terminal e tunel ----
+ipcMain.handle('get-nodes', async () => {
+	return { nodes: getNodes(), activeNode: getActiveNodeId(), urlHost: activeUrlHost() };
+});
+
+ipcMain.handle('set-active-node', async (event, nodeId) => {
+	try {
+		return await switchNode(nodeId);
+	} catch (error) {
+		log.error('Falha ao trocar de no:', error.message);
+		return { success: false, error: error.message };
+	}
+});
+
+ipcMain.handle('open-terminal', async () => {
+	try {
+		return openHostTerminal();
+	} catch (error) {
+		log.error('open-terminal falhou:', error.message);
+		return { success: false, error: error.message };
+	}
+});
+
+ipcMain.handle('tunnel-toggle', async (event, enabled) => {
+	const config = loadConfig() || {};
+	const nodeId = getActiveNodeId();
+	const node = (config.nodes || {})[nodeId];
+	if (!node || !node.tunnel) {
+		return { success: false, error: 'O no ativo nao tem tunel configurado.' };
+	}
+
+	node.tunnel.enabled = !!enabled;
+	saveConfig(config);
+
+	const result = enabled ? startTunnel({ ...node, id: nodeId }) : (stopTunnel(), { success: true });
+	if (!result.success) {
+		// Nao deixa a config mentir: se o tunel nao subiu, volta o flag.
+		node.tunnel.enabled = false;
+		saveConfig(config);
+		return result;
+	}
+
+	closeAllTabs();
+	notifyNodeChanged();
+	await pollOnce();
+	return { success: true, enabled: !!enabled };
 });
 
 ipcMain.handle('service-action', async (event, { service, action }) => {
@@ -828,6 +1167,7 @@ app.on('will-quit', () => {
 
 app.on('before-quit', () => {
 	app.isQuitting = true;
+	stopTunnel();
 	destroyTray();
 });
 

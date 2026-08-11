@@ -1,105 +1,144 @@
 {
-    "version":  "1.0.0",
-    "theme":  "light",
-    "services":  {
-                     "localhost":  {
-                                       "name":  "localhost",
-                                       "url":  "http://localhost:8080",
-                                       "port":  8080,
-                                       "enabled":  true,
-                                       "autoLogin":  true,
-                                       "credentials":  {
-                                                           "username":  "",
-                                                           "password":  ""
-                                                       }
-                                   },
-                     "phpmyadmin":  {
-                                        "name":  "phpMyAdmin",
-                                        "url":  "http://localhost:8080/phpmyadmin",
-                                        "port":  8080,
-                                        "enabled":  true,
-                                        "autoLogin":  true,
-                                        "credentials":  {
-                                                            "username":  "root",
-                                                            "password":  ""
-                                                        }
-                                    },
-                     "vscode":  {
-                                    "name":  "VSCode",
-                                    "url":  "http://localhost:12777",
-                                    "port":  12777,
-                                    "enabled":  true,
-                                    "autoLogin":  true,
-                                    "credentials":  {
-                                                        "username":  "",
-                                                        "password":  ""
-                                                    }
-                                },
-                     "mailpit":  {
-                                     "name":  "Mailpit",
-                                     "url":  "http://localhost:8080/mailpit",
-                                     "port":  8080,
-                                     "enabled":  true,
-                                     "autoLogin":  false,
-                                     "credentials":  {
-                                                         "username":  "",
-                                                         "password":  ""
-                                                     }
-                                 },
-                     "filebrowser":  {
-                                         "name":  "Arquivos",
-                                         "url":  "http://localhost:8081",
-                                         "port":  8081,
-                                         "enabled":  true,
-                                         "autoLogin":  true,
-                                         "credentials":  {
-                                                             "username":  "admin",
-                            "password": "adminadmin123"
-                                                         }
-                                     },
-                     "mongodb":  {
-                                     "name":  "Mongo UI",
-                                     "url":  "http://localhost:8082",
-                                     "port":  8082,
-                                     "enabled":  true,
-                                     "autoLogin":  true,
-                                     "credentials":  {
-                                                         "username":  "admin",
-                                                         "password":  "admin"
-                                                     }
-                                 },
-                     "nginx":  {
-                                   "name":  "NGINX",
-                                   "url":  "http://localhost:8083",
-                                   "port":  8083,
-                                   "enabled":  true,
-                                   "autoLogin":  true,
-                                   "credentials":  {
-                                                       "username":  "",
-                                                       "password":  ""
-                                                   }
-                               },
-                     "prometheus":  {
-                                        "name":  "Prometheus",
-                                        "url":  "http://localhost:9090",
-                                        "port":  9090,
-                                        "enabled":  true,
-                                        "autoLogin":  true,
-                                        "credentials":  {
-                                                            "username":  "",
-                                                            "password":  ""
-                                                        }
-                                    },
-                     "grafana":  {
-                                     "name":  "Grafana",
-                                     "url":  "http://localhost:3000",
-                                     "port":  3000,
-                                     "enabled":  true,
-                                     "autoLogin":  true,
-                                     "credentials":  {
-                                                         "username":  "admin",
-                                                         "password":  "admin"
-                                                     }
-                                 }
-                 }
+    "version": "1.1.0",
+    "theme": "light",
+    "activeNode": "local",
+    "nodes": {
+        "local": {
+            "label": "Local",
+            "podmanConnection": "",
+            "host": "localhost",
+            "tunnel": null
+        },
+        "pi": {
+            "label": "Raspberry Pi",
+            "podmanConnection": "pi",
+            "host": "herodev.local",
+            "tunnel": {
+                "enabled": false,
+                "sshTarget": "herodjou@herodev.local"
+            }
+        }
+    },
+    "services": {
+        "localhost": {
+            "name": "localhost",
+            "icon": "assets/icons/localhost.svg",
+            "url": "http://localhost:8080",
+            "port": 8080,
+            "enabled": true,
+            "autoLogin": true,
+            "credentials": {
+                "username": "",
+                "password": ""
+            }
+        },
+        "phpmyadmin": {
+            "name": "phpMyAdmin",
+            "icon": "assets/icons/phpmyadmin.svg",
+            "url": "http://localhost:8080/phpmyadmin",
+            "port": 8080,
+            "enabled": true,
+            "autoLogin": true,
+            "credentials": {
+                "username": "root",
+                "password": ""
+            }
+        },
+        "vscode": {
+            "name": "VSCode",
+            "icon": "assets/icons/vscode.svg",
+            "url": "http://localhost:12777",
+            "port": 12777,
+            "enabled": true,
+            "autoLogin": true,
+            "credentials": {
+                "username": "",
+                "password": ""
+            }
+        },
+        "terminal": {
+            "name": "Terminal",
+            "icon": "fa:fa-terminal",
+            "url": "http://localhost:8080/terminal",
+            "port": 8080,
+            "enabled": true,
+            "autoLogin": true,
+            "credentials": {
+                "username": "herodev",
+                "password": "herodev123"
+            }
+        },
+        "mailpit": {
+            "name": "Mailpit",
+            "icon": "assets/icons/mailpit.svg",
+            "url": "http://localhost:8080/mailpit",
+            "port": 8080,
+            "enabled": true,
+            "autoLogin": false,
+            "credentials": {
+                "username": "",
+                "password": ""
+            }
+        },
+        "filebrowser": {
+            "name": "Arquivos",
+            "icon": "assets/icons/disquete.svg",
+            "url": "http://localhost:8081",
+            "port": 8081,
+            "enabled": true,
+            "autoLogin": true,
+            "credentials": {
+                "username": "admin",
+                "password": "adminadmin123"
+            }
+        },
+        "mongodb": {
+            "name": "Mongo UI",
+            "icon": "assets/icons/mongodb.svg",
+            "url": "http://localhost:8082",
+            "port": 8082,
+            "enabled": true,
+            "autoLogin": true,
+            "credentials": {
+                "username": "admin",
+                "password": "admin"
+            }
+        },
+        "nginx": {
+            "name": "NGINX",
+            "icon": "assets/icons/nginx.svg",
+            "url": "http://localhost:8083",
+            "port": 8083,
+            "enabled": true,
+            "autoLogin": true,
+            "credentials": {
+                "username": "",
+                "password": ""
+            }
+        },
+        "prometheus": {
+            "name": "Prometheus",
+            "icon": "assets/icons/prometheus.svg",
+            "url": "http://localhost:9090",
+            "port": 9090,
+            "enabled": true,
+            "autoLogin": true,
+            "credentials": {
+                "username": "",
+                "password": ""
+            }
+        },
+        "grafana": {
+            "name": "Grafana",
+            "icon": "assets/icons/grafana.svg",
+            "url": "http://localhost:3000",
+            "port": 3000,
+            "enabled": true,
+            "autoLogin": true,
+            "credentials": {
+                "username": "admin",
+                "password": "admin"
+            }
+        }
+    }
 }

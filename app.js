@@ -1,6 +1,9 @@
 let resourcesLoaded = false;
 let imagesLoaded = false;
 let currentStatus = { containerRunning: false, services: {} };
+// Nos disponiveis (local x Raspberry) e qual esta ativo. Preenchido por
+// refreshNodes(); a UI inteira deriva a URL dos servicos daqui.
+let nodeState = { nodes: {}, activeNode: 'local', urlHost: 'localhost' };
 
 window.addEventListener('load', () => {
     resourcesLoaded = true;
@@ -58,7 +61,158 @@ function initStatusListener() {
     if (typeof window.api !== 'undefined' && window.api.onAppNotice) {
         window.api.onAppNotice(showAppNotice);
     }
+    if (typeof window.api !== 'undefined' && window.api.onNodeChanged) {
+        window.api.onNodeChanged(() => refreshNodes());
+    }
+    refreshNodes();
     loadStack();
+}
+
+// ============ NÓS (local x Raspberry) ============
+async function refreshNodes() {
+    if (typeof window.api === 'undefined' || !window.api.getNodes) return;
+    try {
+        nodeState = await window.api.getNodes();
+        if (!appConfig) await loadConfig();
+    } catch {
+        return;
+    }
+    renderServiceCards();
+    renderNodeIndicator();
+    updateStatusBar(currentStatus);
+    loadStack();
+}
+
+function activeNodeInfo() {
+    const node = (nodeState.nodes || {})[nodeState.activeNode] || {};
+    return { id: nodeState.activeNode, label: node.label || nodeState.activeNode, tunnel: node.tunnel || null };
+}
+
+function renderNodeIndicator() {
+    const el = document.getElementById('nodeIndicator');
+    if (!el) return;
+    const node = activeNodeInfo();
+    const viaTunel = node.tunnel && node.tunnel.enabled ? ' (túnel)' : '';
+    el.textContent = `${node.label}${viaTunel} · ${nodeState.urlHost}`;
+}
+
+async function switchNode(nodeId) {
+    if (nodeId === nodeState.activeNode) return;
+    if (typeof window.api === 'undefined' || !window.api.setActiveNode) return;
+    const result = await window.api.setActiveNode(nodeId);
+    if (!result || !result.success) {
+        showAppNotice({ text: `Não foi possível trocar de nó: ${result && result.error}` });
+        return;
+    }
+    await refreshNodes();
+}
+
+async function toggleTunnel() {
+    const node = activeNodeInfo();
+    if (!node.tunnel) return;
+    const result = await window.api.tunnelToggle(!node.tunnel.enabled);
+    if (!result || !result.success) {
+        showAppNotice({ text: `Túnel SSH: ${result && result.error}` });
+    }
+    await refreshNodes();
+}
+
+async function openHostTerminal() {
+    if (typeof window.api === 'undefined' || !window.api.openTerminal) return;
+    const result = await window.api.openTerminal();
+    if (!result || !result.success) {
+        showAppNotice({ text: `Terminal do host: ${result && result.error}` });
+    }
+}
+
+// ============ CARDS DE SERVIÇO ============
+// Um card por servico habilitado no config.json. O HTML nao guarda mais URL
+// nenhuma: a do no ativo e resolvida no main.js na hora de abrir.
+function renderServiceCards() {
+    const grid = document.getElementById('serviceCards');
+    if (!grid) return;
+
+    const services = (appConfig && appConfig.services) || {};
+    const entries = Object.entries(services).filter(([_, s]) => s && s.enabled !== false);
+
+    if (!entries.length) {
+        grid.innerHTML = '<div class="col-12 text-center text-muted small">Nenhum serviço habilitado nas configurações.</div>';
+        return;
+    }
+
+    grid.innerHTML = entries.map(([key, service]) => {
+        const name = service.name || key;
+        const url = service.url || '';
+        const icon = String(service.icon || '');
+        const iconHtml = icon.startsWith('fa:')
+            ? `<i class="fas ${escapeHtml(icon.slice(3))} service-icon mx-auto d-block mb-2"></i>`
+            : `<img src="${escapeHtml(icon)}" alt="${escapeHtml(name)}" class="service-icon mx-auto d-block mb-2">`;
+
+        // O Terminal ganha um botao extra: abrir no terminal nativo do host,
+        // que funciona mesmo se o ttyd nao estiver instalado na imagem.
+        const hostTerminalBtn = key === 'terminal'
+            ? `<button class="btn btn-sm btn-outline-warning action-btn" data-open="host-terminal" title="Abrir no terminal do sistema">
+                    <i class="fas fa-desktop"></i>
+               </button>`
+            : '';
+
+        // data-* em vez de onclick inline: nome e URL vem do config.json, que o
+        // usuario edita — aspas no valor quebrariam um literal JS no atributo.
+        const attrs = `data-url="${escapeHtml(url)}" data-name="${escapeHtml(name)}"`;
+
+        return `
+            <div class="col">
+                <div class="card h-100">
+                    <div class="card-body text-center py-3">
+                        ${iconHtml}
+                        <h6 class="card-title mb-0 small">${escapeHtml(name)}</h6>
+                    </div>
+                    <div class="card-footer d-flex justify-content-around p-2">
+                        <button class="btn btn-sm btn-outline-primary action-btn" data-open="window" ${attrs} title="Nova janela">
+                            <i class="fas fa-window-maximize"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary action-btn" data-open="tab" ${attrs} title="Nova aba">
+                            <i class="fas fa-folder-plus"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-info action-btn" data-open="browser" ${attrs} title="Navegador">
+                            <i class="fas fa-external-link-alt"></i>
+                        </button>
+                        ${hostTerminalBtn}
+                    </div>
+                </div>
+            </div>`;
+    }).join('');
+
+    applyTheme((appConfig && appConfig.theme) || 'dark');
+}
+
+// URL da interface web de um serviço monitorado. A porta do systemd nem sempre
+// é a porta pública (o Mailpit e o ttyd saem pelo Apache em /mailpit e
+// /terminal), então o config.json é quem manda — a porta fica de reserva.
+function serviceUiUrl(info) {
+    const fromConfig = info.configKey && appConfig && appConfig.services && appConfig.services[info.configKey];
+    if (fromConfig && fromConfig.url) return fromConfig.url;
+    return `http://${nodeState.urlHost || 'localhost'}:${info.port}`;
+}
+
+// Delegacao: cards e status bar sao re-renderizados a cada ciclo de polling e
+// a cada troca de no — ouvir no documento evita religar listener toda vez.
+document.addEventListener('click', (event) => {
+    const el = event.target.closest('[data-open]');
+    if (!el) return;
+    event.preventDefault();
+    const openType = el.getAttribute('data-open');
+    if (openType === 'host-terminal') {
+        openHostTerminal();
+        return;
+    }
+    openService(el.getAttribute('data-url'), openType, el.getAttribute('data-name'));
+});
+
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
 }
 
 function showAppNotice(notice) {
@@ -166,10 +320,44 @@ function updateStatusBar(status) {
         </button>
     `;
     
-    const containerStatusIcon = status.containerRunning 
+    const containerStatusIcon = status.containerRunning
         ? '<i class="fas fa-circle text-success"></i>'
         : '<i class="fas fa-circle text-danger"></i>';
-    
+
+    // Seletor de nó: mesmo app, container desta máquina ou o do Raspberry.
+    const node = activeNodeInfo();
+    const nodeOptions = Object.entries(nodeState.nodes || {}).map(([id, info]) => `
+        <li><a class="dropdown-item ${id === node.id ? 'active' : ''}" href="#" onclick="switchNode('${id}')">
+            <i class="fas fa-${id === node.id ? 'check' : 'circle-notch'} me-1"></i> ${info.label || id}
+        </a></li>
+    `).join('');
+
+    const tunnelItem = node.tunnel ? `
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item" href="#" onclick="toggleTunnel()">
+            <i class="fas fa-${node.tunnel.enabled ? 'unlink' : 'link'} text-info"></i>
+            ${node.tunnel.enabled ? 'Desligar túnel SSH' : 'Ligar túnel SSH (usar localhost)'}
+        </a></li>
+    ` : '';
+
+    const nodeDropdown = `
+        <div class="dropdown d-inline-block">
+            <button class="btn btn-sm btn-dark dropdown-toggle" data-bs-toggle="dropdown" title="Nó ativo">
+                <i class="fas fa-server"></i>
+                <span class="ms-1">${node.label}</span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-dark">
+                <li class="dropdown-header">Nó ativo</li>
+                ${nodeOptions}
+                ${tunnelItem}
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item" href="#" onclick="openHostTerminal()">
+                    <i class="fas fa-terminal text-warning"></i> Abrir terminal do container
+                </a></li>
+            </ul>
+        </div>
+    `;
+
     const containerDropdown = `
         <div class="dropdown d-inline-block">
             <button class="btn btn-sm btn-dark dropdown-toggle" data-bs-toggle="dropdown">
@@ -196,10 +384,10 @@ function updateStatusBar(status) {
     `;
     
     if (!status.containerRunning) {
-        servicesContainer.innerHTML = settingsBtn + containerDropdown;
+        servicesContainer.innerHTML = settingsBtn + nodeDropdown + containerDropdown;
         return;
     }
-    
+
     const serviceItems = Object.entries(status.services || {})
         .filter(([_, info]) => info.installed !== false)
         .map(([service, info]) => {
@@ -233,7 +421,8 @@ function updateStatusBar(status) {
                         </a></li>
                         ${info.hasUI && info.active ? `
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="#" onclick="openService('http://localhost:${info.port}', 'tab', '${info.name}')">
+                            <li><a class="dropdown-item" href="#" data-open="tab"
+                                   data-url="${escapeHtml(serviceUiUrl(info))}" data-name="${escapeHtml(info.name)}">
                                 <i class="fas fa-folder-plus"></i> Abrir interface
                             </a></li>
                         ` : ''}
@@ -242,7 +431,7 @@ function updateStatusBar(status) {
             `;
         }).join('');
     
-    servicesContainer.innerHTML = settingsBtn + containerDropdown + serviceItems;
+    servicesContainer.innerHTML = settingsBtn + nodeDropdown + containerDropdown + serviceItems;
 }
 
 async function showServiceLogs(service) {
@@ -534,12 +723,17 @@ async function saveSettings() {
     });
     
     await saveConfig(appConfig);
-    
+    // URL/porta/habilitado mudaram: os cards vem da config, então re-renderiza.
+    renderServiceCards();
+
     const modal = bootstrap.Modal.getInstance(document.getElementById('settingsModal'));
     if (modal) modal.hide();
 }
 
 // Carregar config ao iniciar
 loadConfig().then(config => {
-    if (config) applyTheme(config.theme);
+    if (config) {
+        applyTheme(config.theme);
+        renderServiceCards();
+    }
 });
