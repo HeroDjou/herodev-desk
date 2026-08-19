@@ -13,6 +13,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const log = require('./logger');
 const services = require('./services');
+const updater = require('./updater');
 const { createTray, updateTrayMenu, destroyTray } = require('./tray');
 
 let mainWindow;
@@ -472,6 +473,10 @@ function setupAutoLogin(webContents, url, serviceName) {
 }
 
 function createWindow() {
+	// O updater precisa achar o codigo-fonte a partir do bundle, e quem sabe
+	// fazer isso e o findRepoRoot daqui (mesma injecao do createTray).
+	updater.configure({ findRepoRoot });
+
 	// Antes de qualquer polling: aponta o services.js pro no gravado na config
 	// (e religa o tunel, se ele estava ligado quando o app foi fechado).
 	const node = applyActiveNode();
@@ -1131,7 +1136,7 @@ function sendBackupState(state) {
 	} catch { /* ignore */ }
 }
 
-function notifyBackup(title, body) {
+function notify(title, body) {
 	// Notification.isSupported() e false em ambiente sem desktop (ex.: sessao
 	// SSH sem X). Sem a checagem, o construtor derruba o processo principal.
 	if (!Notification.isSupported()) return;
@@ -1176,19 +1181,156 @@ ipcMain.handle('backup-now', async () => {
 		if (result.success) {
 			const size = formatBytes(result.backup.size);
 			log.info(`Backup sob demanda concluido em "${node.label}": ${result.backup.file} (${size})`);
-			notifyBackup('Backup concluído', `${result.backup.file} (${size}) em ${node.label}`);
+			notify('Backup concluído', `${result.backup.file} (${size}) em ${node.label}`);
 		} else {
 			log.error(`Backup sob demanda falhou em "${node.label}":`, result.error);
-			notifyBackup('Backup falhou', String(result.error || '').slice(0, 200));
+			notify('Backup falhou', String(result.error || '').slice(0, 200));
 		}
 		return result;
 	} catch (error) {
 		log.error('backup-now falhou:', error.message);
-		notifyBackup('Backup falhou', error.message.slice(0, 200));
+		notify('Backup falhou', error.message.slice(0, 200));
 		return { success: false, error: error.message };
 	} finally {
 		backupRunning = false;
 		sendBackupState({ running: false });
+	}
+});
+
+// ============================================================
+// Aplicacoes do /workspace/www
+//
+// A varredura vem do services.js (podman exec); a URL sai daqui, porque quem
+// sabe o host do no ativo e o main — no Raspberry o mesmo app mora em outro
+// endereco. O renderer so recebe URL pronta, como ja acontece com os servicos.
+// ============================================================
+function wwwBaseUrl() {
+	const config = loadConfig() || {};
+	const localhost = config.services && config.services.localhost;
+	const raw = (localhost && localhost.url) || 'http://localhost:8080';
+	return resolveServiceUrl(raw);
+}
+
+function comUrl(base, app) {
+	const caminho = app.rel.split('/').map(encodeURIComponent).join('/');
+	return {
+		...app,
+		url: `${base}/${caminho}/`,
+		wpAdminUrl: app.isWp ? `${base}/${caminho}/wp-admin/` : null
+	};
+}
+
+ipcMain.handle('get-www-apps', async () => {
+	try {
+		const data = await services.getWwwApps();
+		const base = wwwBaseUrl();
+		return {
+			...data,
+			apps: data.apps.map(a => comUrl(base, a)),
+			groups: data.groups.map(g => ({ name: g.name, apps: g.apps.map(a => comUrl(base, a)) }))
+		};
+	} catch (error) {
+		log.warn('get-www-apps falhou:', error.message);
+		return { available: false, total: 0, apps: [], groups: [], error: error.message };
+	}
+});
+
+// ============================================================
+// Atualizacao do proprio app
+//
+// Mesma logica do aviso de container defasado no dashboard: comparar o que
+// esta rodando com o que existe de mais novo e deixar o usuario decidir. Aqui
+// "mais novo" e o codigo local (fonte > bundle) ou o origin/master.
+// updateRunning e mutex de processo: dois builds simultaneos na mesma pasta
+// so brigam por I/O e ainda embaralham o out-build.
+// ============================================================
+let updateRunning = false;
+let ultimoEstadoUpdate = null;
+
+function sendUpdateState(state) {
+	ultimoEstadoUpdate = state;
+	try {
+		if (mainView && mainView.webContents && !mainView.webContents.isDestroyed()) {
+			mainView.webContents.send('app-update-state', state);
+		}
+	} catch { /* ignore */ }
+}
+
+async function checarAtualizacaoDoApp() {
+	try {
+		const estado = await updater.checkUpdate();
+		if (estado.error) log.warn('Checagem de atualizacao do app:', estado.error);
+		else if (updater.temAtualizacao(estado)) {
+			log.info(`Atualizacao disponivel (codigo local: ${estado.localNewer}, commits atras: ${estado.commitsBehind}).`);
+		}
+		sendUpdateState({ running: false, check: estado });
+		return estado;
+	} catch (error) {
+		log.warn('Checagem de atualizacao falhou:', error.message);
+		return null;
+	}
+}
+
+ipcMain.handle('get-app-info', async () => ({
+	version: app.getVersion(),
+	packaged: app.isPackaged,
+	platform: process.platform,
+	arch: process.arch
+}));
+
+ipcMain.handle('get-app-update', async () => {
+	if (updateRunning) return ultimoEstadoUpdate;
+	return checarAtualizacaoDoApp();
+});
+
+ipcMain.handle('app-update-run', async () => {
+	if (updateRunning) return { success: false, error: 'Ja existe uma atualizacao em andamento.' };
+
+	updateRunning = true;
+	sendUpdateState({ running: true, step: 'Preparando...', line: '' });
+
+	try {
+		const resultado = await updater.runUpdate((linha) => {
+			sendUpdateState({ running: true, step: 'Compilando', line: linha.slice(0, 200) });
+		});
+
+		if (!resultado.success) {
+			log.error('Atualizacao do app falhou:', resultado.error);
+			notify('Atualização falhou', String(resultado.error || '').slice(0, 200));
+			sendUpdateState({ running: false, error: resultado.error });
+			return resultado;
+		}
+
+		// Em dev nao ha bundle pra trocar: relancar ja pega o codigo novo. O
+		// recordRestart mantem o detector de loop de restart informado.
+		if (resultado.dev) {
+			log.info('Atualizacao concluida (dev): relancando.');
+			sendUpdateState({ running: false, restarting: true });
+			app.isQuitting = true;
+			recordRestart();
+			app.relaunch();
+			setTimeout(() => app.exit(0), 300);
+			return { success: true, restarting: true };
+		}
+
+		const troca = updater.applyAndRestart();
+		if (!troca.success) {
+			log.error('Troca do bundle falhou:', troca.error);
+			sendUpdateState({ running: false, error: troca.error });
+			return troca;
+		}
+
+		log.info('Atualizacao concluida: encerrando para abrir a versao nova.');
+		sendUpdateState({ running: false, restarting: true });
+		app.isQuitting = true;
+		setTimeout(() => app.quit(), 500);
+		return { success: true, restarting: true, pullPulado: resultado.pullPulado };
+	} catch (error) {
+		log.error('app-update-run falhou:', error.message);
+		sendUpdateState({ running: false, error: error.message });
+		return { success: false, error: error.message };
+	} finally {
+		updateRunning = false;
 	}
 });
 

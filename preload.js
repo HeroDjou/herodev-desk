@@ -40,6 +40,10 @@ contextBridge.exposeInMainWorld('api', {
     getStack: () => {
         return ipcRenderer.invoke('get-stack');
     },
+    // Aplicacoes do /workspace/www (raiz + pastas que agrupam apps)
+    getWwwApps: () => {
+        return ipcRenderer.invoke('get-www-apps');
+    },
     onServicesStatus: (callback) => {
         ipcRenderer.on('services-status', (event, status) => callback(status));
     },
@@ -78,6 +82,19 @@ contextBridge.exposeInMainWorld('api', {
     },
     onBackupState: (callback) => {
         ipcRenderer.on('backup-state', (event, state) => callback(state));
+    },
+    // Atualizacao do proprio app (checar, recompilar e reabrir)
+    getAppInfo: () => {
+        return ipcRenderer.invoke('get-app-info');
+    },
+    getAppUpdate: () => {
+        return ipcRenderer.invoke('get-app-update');
+    },
+    runAppUpdate: () => {
+        return ipcRenderer.invoke('app-update-run');
+    },
+    onAppUpdateState: (callback) => {
+        ipcRenderer.on('app-update-state', (event, state) => callback(state));
     },
     // DevTools toggle
     toggleDevTools: () => {

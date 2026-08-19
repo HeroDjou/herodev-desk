@@ -7,6 +7,11 @@
 // se estivesse ativo. Agora o package.json não tem mais "config.forge" e este
 // é o único lugar.
 module.exports = {
+  // Pasta de saida. O `electron-forge package` nao tem flag pra isso (so
+  // --arch/--platform), mas o core le forgeConfig.outDir. O auto-update do
+  // proprio app compila com HERODEV_OUT_DIR=out-build: o forge APAGA e recria
+  // a pasta de saida, e no macOS ela contem o .app que esta rodando.
+  outDir: process.env.HERODEV_OUT_DIR || 'out',
   packagerConfig: {
     asar: true,
     appCopyright: 'Copyright © 2026 HeroDjou',

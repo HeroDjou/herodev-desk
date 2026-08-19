@@ -62,14 +62,22 @@ function initStatusListener() {
         window.api.onAppNotice(showAppNotice);
     }
     if (typeof window.api !== 'undefined' && window.api.onNodeChanged) {
-        window.api.onNodeChanged(() => { refreshNodes(); loadBackupStatus(); });
+        window.api.onNodeChanged(() => { refreshNodes(); loadBackupStatus(); loadWwwApps(); });
     }
     if (typeof window.api !== 'undefined' && window.api.onBackupState) {
         window.api.onBackupState(onBackupState);
     }
+    if (typeof window.api !== 'undefined' && window.api.onAppUpdateState) {
+        window.api.onAppUpdateState(onAppUpdateState);
+    }
     refreshNodes();
     loadStack();
     loadBackupStatus();
+    loadWwwApps();
+    loadAppInfo();
+    // Atrasado de proposito: a checagem faz git fetch (rede) e nao pode
+    // disputar com o primeiro ciclo de status nem segurar a home.
+    setTimeout(loadAppUpdate, 8000);
 }
 
 // ============ NÓS (local x Raspberry) ============
@@ -234,6 +242,198 @@ function showAppNotice(notice) {
         document.body.appendChild(el);
     }
     el.textContent = '⚠ ' + notice.text;
+}
+
+// ============ ATUALIZAÇÃO DO PRÓPRIO APP ============
+// O main avisa por app-update-state: uma vez sozinho alguns segundos depois de
+// abrir (checagem) e a cada passo durante a compilação. A barra só existe
+// quando há motivo — app em dia não ocupa espaço na home.
+let updateState = { check: null, running: false, step: '', line: '', error: null, restarting: false };
+
+async function loadAppInfo() {
+    if (typeof window.api === 'undefined' || !window.api.getAppInfo) return;
+    try {
+        const info = await window.api.getAppInfo();
+        const el = document.getElementById('appVersion');
+        if (el && info && info.version) el.textContent = `HeroDev v${info.version}`;
+    } catch { /* rodapé fica com o texto padrão */ }
+}
+
+function onAppUpdateState(state) {
+    if (!state) return;
+    // O evento de checagem traz "check"; os de progresso, não. Preservar o
+    // último check mantém o motivo visível enquanto compila.
+    updateState = { ...updateState, ...state, check: state.check || updateState.check };
+    renderUpdateBar();
+}
+
+function caixaUpdate(cor, conteudo) {
+    return `
+        <div class="d-flex flex-wrap align-items-center justify-content-center gap-3 mb-4"
+             style="background:${cor.fundo};border:1px solid ${cor.borda};border-radius:12px;padding:12px 18px">
+            ${conteudo}
+        </div>`;
+}
+
+const COR_AVISO = { fundo: 'rgba(210,153,34,.12)', borda: 'rgba(210,153,34,.45)' };
+const COR_ERRO = { fundo: 'rgba(248,81,73,.12)', borda: 'rgba(248,81,73,.45)' };
+const COR_OK = { fundo: 'rgba(63,185,80,.12)', borda: 'rgba(63,185,80,.4)' };
+
+function renderUpdateBar() {
+    const el = document.getElementById('updateBar');
+    if (!el) return;
+
+    if (updateState.restarting) {
+        el.innerHTML = caixaUpdate(COR_OK,
+            '<span class="small"><i class="fas fa-check me-2"></i>Atualizado. Reabrindo o app...</span>');
+        return;
+    }
+
+    if (updateState.running) {
+        const linha = updateState.line
+            ? `<code class="small text-truncate" style="max-width:520px">${escapeHtml(updateState.line)}</code>`
+            : '';
+        el.innerHTML = caixaUpdate(COR_AVISO, `
+            <span class="small">
+                <span class="spinner-border spinner-border-sm me-2"></span>
+                ${escapeHtml(updateState.step || 'Atualizando')}...
+            </span>
+            ${linha}`);
+        return;
+    }
+
+    if (updateState.error) {
+        el.innerHTML = caixaUpdate(COR_ERRO, `
+            <span class="small"><i class="fas fa-triangle-exclamation me-2"></i>
+                Atualização falhou: ${escapeHtml(updateState.error)}</span>
+            <button id="appUpdateBtn" class="btn btn-sm btn-outline-warning">Tentar de novo</button>`);
+        return;
+    }
+
+    const check = updateState.check;
+    if (!check || check.error || (!check.localNewer && !check.commitsBehind)) {
+        el.innerHTML = '';
+        return;
+    }
+
+    el.innerHTML = caixaUpdate(COR_AVISO, `
+        <span class="small"><i class="fas fa-arrow-rotate-right me-2"></i>
+            Versão nova do HeroDev Desktop</span>
+        <button id="appUpdateBtn" class="btn btn-sm btn-outline-primary">Atualizar e reiniciar</button>`);
+}
+
+async function loadAppUpdate() {
+    if (typeof window.api === 'undefined' || !window.api.getAppUpdate) return;
+    try {
+        onAppUpdateState({ running: false, check: await window.api.getAppUpdate() });
+    } catch { /* silencioso: checagem é conveniência, não função crítica */ }
+}
+
+async function runAppUpdate() {
+    if (updateState.running || typeof window.api === 'undefined' || !window.api.runAppUpdate) return;
+    updateState = { ...updateState, running: true, step: 'Preparando', line: '', error: null };
+    renderUpdateBar();
+    const resultado = await window.api.runAppUpdate();
+    // Sucesso encerra o app; só o erro volta pra cá com algo a mostrar.
+    if (resultado && !resultado.success) {
+        updateState = { ...updateState, running: false, error: resultado.error || 'falha desconhecida' };
+        renderUpdateBar();
+    }
+}
+
+document.addEventListener('click', (event) => {
+    if (event.target.closest('#appUpdateBtn')) {
+        event.preventDefault();
+        runAppUpdate();
+    }
+});
+
+// ============ APLICAÇÕES DO /workspace/www ============
+// Mesma lista do dashboard em localhost:8080, aqui como lancador: pasta que so
+// contem aplicacoes vira um grupo, e o card de dentro e igual ao de fora.
+// A varredura e do NO ATIVO — trocar de no troca a lista inteira.
+function appIconClass(tipo) {
+    if (tipo === 'WordPress') return 'fab fa-wordpress';
+    if (tipo === 'PHP') return 'fas fa-code';
+    return 'fas fa-globe';
+}
+
+// Mesmos data-* dos cards de servico: a delegacao de clique la de cima ja
+// despacha pro openService(), entao nao ha listener novo aqui.
+function appCard(app) {
+    const attrs = `data-url="${escapeHtml(app.url)}" data-name="${escapeHtml(app.name)}"`;
+    const wpBtn = app.wpAdminUrl
+        ? `<button class="btn btn-sm btn-outline-warning action-btn" data-open="tab"
+                   data-url="${escapeHtml(app.wpAdminUrl)}" data-name="${escapeHtml(app.name)} wp-admin"
+                   title="Painel WordPress">
+               <i class="fab fa-wordpress"></i>
+           </button>`
+        : '';
+
+    return `
+            <div class="card">
+                <div class="card-body text-center py-3">
+                    <i class="${appIconClass(app.tipo)} service-icon mx-auto d-block mb-2"></i>
+                    <h6 class="card-title mb-0 small">${escapeHtml(app.name)}</h6>
+                    <span class="text-muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px">
+                        ${escapeHtml(app.tipo)}
+                    </span>
+                </div>
+                <div class="card-footer d-flex justify-content-around p-2">
+                    <button class="btn btn-sm btn-outline-primary action-btn" data-open="window" ${attrs} title="Nova janela">
+                        <i class="fas fa-window-maximize"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary action-btn" data-open="tab" ${attrs} title="Nova aba">
+                        <i class="fas fa-folder-plus"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-info action-btn" data-open="browser" ${attrs} title="Navegador">
+                        <i class="fas fa-external-link-alt"></i>
+                    </button>
+                    ${wpBtn}
+                </div>
+            </div>`;
+}
+
+function appGrid(apps) {
+    return `<div class="app-grid">${apps.map(appCard).join('')}</div>`;
+}
+
+function renderWwwApps(data) {
+    const el = document.getElementById('appsContainer');
+    if (!el) return;
+
+    if (!data || !data.available) {
+        el.innerHTML = '<div class="text-center text-muted small">Indisponível (container parado?)</div>';
+        return;
+    }
+    if (!data.total) {
+        el.innerHTML = '<div class="text-center text-muted small">Nenhuma aplicação em /workspace/www</div>';
+        return;
+    }
+
+    const raiz = data.apps.length ? appGrid(data.apps) : '';
+    const grupos = (data.groups || []).map(g => `
+        <section class="app-group">
+            <h3 class="app-group-title">
+                <i class="fas fa-folder"></i>${escapeHtml(g.name)}
+                <span class="count">${g.apps.length} app(s)</span>
+            </h3>
+            ${appGrid(g.apps)}
+        </section>`).join('');
+
+    el.innerHTML = raiz + (grupos ? `<div class="app-groups">${grupos}</div>` : '');
+    // Depois de montar: o applyTheme percorre os .card existentes, entao card
+    // criado agora ficaria fora do tema escuro.
+    applyTheme((appConfig && appConfig.theme) || 'dark');
+}
+
+async function loadWwwApps() {
+    if (typeof window.api === 'undefined' || !window.api.getWwwApps) return;
+    try {
+        renderWwwApps(await window.api.getWwwApps());
+    } catch {
+        renderWwwApps(null);
+    }
 }
 
 // ============ BACKUP DO BANCO ============
@@ -423,7 +623,11 @@ async function containerAction(action) {
 }
 
 function updateStatusBar(status) {
+    // Container que acabou de subir: a lista de aplicacoes sai de "indisponivel"
+    // sozinha, sem depender de o usuario recarregar a home.
+    const subiuAgora = status && status.containerRunning && !currentStatus.containerRunning;
     currentStatus = status;
+    if (subiuAgora) loadWwwApps();
     const statusBar = document.getElementById('statusBar');
     const servicesContainer = document.getElementById('servicesStatus');
     

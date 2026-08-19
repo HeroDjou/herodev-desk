@@ -306,6 +306,87 @@ async function runBackup() {
     return { success: true, backup: created, status };
 }
 
+// ============================================================
+// Aplicacoes do /workspace/www
+//
+// Mesmas regras do dashboard PHP (config/www/index.php do herodev-container),
+// pra os dois mostrarem a mesma coisa: pasta "rodavel" e a que tem index.php
+// ou index.html; pasta que so CONTEM pastas rodaveis vira grupo (um nivel, nao
+// mais). Vem por podman exec, e nao por HTTP, pra continuar funcionando com o
+// Apache parado e pra respeitar o --connection do no ativo.
+// ============================================================
+const WWW_DIR = '/workspace/www';
+
+// Aspas DUPLAS e nenhum parentese: no Windows isto passa pelo cmd.exe, onde
+// aspas simples nao delimitam e "(" tem significado proprio. Cada teste leva o
+// seu -print, que dispensa o agrupamento do find.
+function listWwwCommand() {
+    return `find ${WWW_DIR} -mindepth 2 -maxdepth 3`
+        + ` -name "index.php" -print -o -name "index.html" -print`
+        + ` -o -name "wp-login.php" -print -o -name "wp-includes" -print`;
+}
+
+function pastaIgnorada(nome) {
+    return !nome || nome[0] === '.' || nome[0] === '_';
+}
+
+function marcarPasta(mapa, chave, marcador) {
+    const info = mapa.get(chave) || { php: false, html: false, wp: false };
+    if (marcador === 'index.php') info.php = true;
+    else if (marcador === 'index.html') info.html = true;
+    else info.wp = true;   // wp-login.php ou wp-includes
+    mapa.set(chave, info);
+    return info;
+}
+
+function tipoDaPasta(info) {
+    if (!info || (!info.php && !info.html)) return null;
+    return { tipo: info.wp ? 'WordPress' : (info.php ? 'PHP' : 'HTML'), isWp: !!info.wp };
+}
+
+async function getWwwApps() {
+    const out = await execInContainer(listWwwCommand());
+    if (out === null) return { available: false, total: 0, apps: [], groups: [] };
+
+    const raiz = new Map();     // "copas"        -> flags
+    const filhos = new Map();   // "sites/buffly" -> flags
+
+    out.split('\n').filter(Boolean).forEach(linha => {
+        if (!linha.startsWith(`${WWW_DIR}/`)) return;
+        const partes = linha.slice(WWW_DIR.length + 1).split('/');
+        const marcador = partes.pop();
+        if (!partes.length || partes.length > 2 || partes.some(pastaIgnorada)) return;
+        marcarPasta(partes.length === 1 ? raiz : filhos, partes.join('/'), marcador);
+    });
+
+    const apps = [];
+    for (const [nome, info] of raiz) {
+        const tipo = tipoDaPasta(info);
+        if (tipo) apps.push({ name: nome, rel: nome, ...tipo });
+    }
+
+    const grupos = new Map();
+    for (const [rel, info] of filhos) {
+        const [grupo, nome] = rel.split('/');
+        // Pasta que ja e app nao vira grupo: wp-admin/ e wp-content/ de um
+        // WordPress tem index.php e apareceriam como aplicacoes dentro dele.
+        if (tipoDaPasta(raiz.get(grupo))) continue;
+        const tipo = tipoDaPasta(info);
+        if (!tipo) continue;
+        if (!grupos.has(grupo)) grupos.set(grupo, []);
+        grupos.get(grupo).push({ name: nome, rel, ...tipo });
+    }
+
+    const porNome = (a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
+    apps.sort(porNome);
+    const groups = [...grupos.entries()]
+        .map(([name, lista]) => ({ name, apps: lista.sort(porNome) }))
+        .sort(porNome);
+
+    const total = apps.length + groups.reduce((soma, g) => soma + g.apps.length, 0);
+    return { available: true, total, apps, groups };
+}
+
 module.exports = {
     SERVICES,
     CONTAINER_NAME,
@@ -328,5 +409,6 @@ module.exports = {
     getHealthCheck,
     getStack,
     runBackup,
-    getBackupStatus
+    getBackupStatus,
+    getWwwApps
 };

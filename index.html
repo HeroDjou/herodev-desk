@@ -21,6 +21,11 @@
 
     <div class="container-fluid px-5" id="mainContent">
         <div id="cardsContainer">
+            <!-- Barra de atualizacao do proprio app (app.js): so aparece quando
+                 o codigo local esta na frente do build ou o GitHub tem commits
+                 novos. -->
+            <div id="updateBar"></div>
+
             <h1 class="text-center mb-4 h3">Central de serviços HeroDev</h1>
             
             <!-- Cards gerados em runtime a partir de config.services (app.js):
@@ -29,6 +34,13 @@
                  sincronia na primeira troca de no. -->
             <div class="row row-cols-2 row-cols-md-3 row-cols-lg-6 g-3" id="serviceCards">
                 <div class="col-12 text-center text-muted small">Carregando serviços...</div>
+            </div>
+
+            <h2 class="h5 text-center mt-5 mb-3">Aplicações</h2>
+            <!-- Conteudo gerado em runtime (app.js): a varredura do
+                 /workspace/www e do no ativo, e as pastas mudam sozinhas. -->
+            <div id="appsContainer" class="pb-2">
+                <span class="text-muted small">Carregando aplicações...</span>
             </div>
 
             <h2 class="h5 text-center mt-5 mb-3">Backup do banco</h2>
@@ -53,7 +65,7 @@
                 </div>
                 <div class="d-flex align-items-center gap-2">
                     <span id="nodeIndicator" class="text-muted small"></span>
-                    <span class="text-muted small">HeroDev v1.1.0</span>
+                    <span id="appVersion" class="text-muted small">HeroDev</span>
                 </div>
             </div>
         </div>

@@ -301,3 +301,60 @@ body.theme-light .card-footer {
     box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
 }
 
+
+/* ---- Aplicacoes do /workspace/www ----
+   Pasta que agrupa aplicacoes: caixa transparente com borda azul clara e o
+   nome no topo. Mesmo azul do dashboard em localhost:8080 (--accent #5b8cff),
+   com o titulo escurecido no tema claro pra ter contraste. */
+/* Card de largura fixa em vez do grid de 6 colunas do Bootstrap: assim o
+   grupo ocupa so o espaco do que tem dentro (uma aplicacao = caixa pequena) e
+   sobra linha pra outro grupo ao lado. */
+.app-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.app-grid .card {
+    width: 170px;
+}
+
+.app-grid .card-footer {
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.app-groups {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 16px;
+    margin-top: 18px;
+}
+
+.app-group {
+    border: 1px solid rgba(91, 140, 255, .4);
+    border-radius: 14px;
+    padding: 14px;
+    max-width: 100%;
+}
+
+.app-group-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 14px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #4a72d6;
+}
+
+.app-group-title .count {
+    opacity: .7;
+    font-weight: 400;
+    font-size: 12px;
+}
+
+body.theme-dark .app-group-title {
+    color: #9fb8ff;
+}
