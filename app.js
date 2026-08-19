@@ -870,6 +870,7 @@ async function saveConfig(config) {
         await window.api.saveConfig(config);
         appConfig = config;
         applyTheme(config.theme);
+        applyPalette(config.palette);
     }
 }
 
@@ -883,10 +884,19 @@ function applyTheme(theme) {
             card.classList.remove('bg-dark', 'text-light');
         });
     } else {
-        document.body.style.backgroundColor = '#1a1a2e';
+        document.body.style.backgroundColor = '#0f1117';
         document.querySelectorAll('.card').forEach(card => {
             card.classList.add('bg-dark', 'text-light');
         });
+    }
+}
+
+// Paleta de cor (accent): eixo independente do tema claro/escuro, ver
+// docs/paleta-de-cores.md. So mexe na var --accent* via classe no body.
+function applyPalette(palette) {
+    document.body.classList.remove('palette-neon-green', 'palette-neon-purple');
+    if (palette === 'neon-green' || palette === 'neon-purple') {
+        document.body.classList.add(`palette-${palette}`);
     }
 }
 
@@ -937,6 +947,23 @@ async function openSettings() {
                                         </label>
                                     </div>
                                 </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Paleta de cor</label>
+                                    <div class="btn-group w-100" role="group">
+                                        <input type="radio" class="btn-check" name="palette" id="paletteDefault" value="default">
+                                        <label class="btn btn-outline-light" for="paletteDefault">
+                                            <span class="palette-dot" style="background:#5b8cff"></span>Padrão
+                                        </label>
+                                        <input type="radio" class="btn-check" name="palette" id="paletteNeonGreen" value="neon-green">
+                                        <label class="btn btn-outline-light" for="paletteNeonGreen">
+                                            <span class="palette-dot" style="background:#2bff88"></span>Neon verde
+                                        </label>
+                                        <input type="radio" class="btn-check" name="palette" id="paletteNeonPurple" value="neon-purple">
+                                        <label class="btn btn-outline-light" for="paletteNeonPurple">
+                                            <span class="palette-dot" style="background:#b24bff"></span>Neon roxo
+                                        </label>
+                                    </div>
+                                </div>
                             </div>
                             <div class="tab-pane fade" id="tabServicos">
                                 <div id="servicesConfigList"></div>
@@ -956,6 +983,8 @@ async function openSettings() {
     // Preencher configurações atuais
     if (appConfig) {
         document.getElementById(appConfig.theme === 'light' ? 'themeLight' : 'themeDark').checked = true;
+        const paletteIds = { default: 'paletteDefault', 'neon-green': 'paletteNeonGreen', 'neon-purple': 'paletteNeonPurple' };
+        document.getElementById(paletteIds[appConfig.palette || 'default']).checked = true;
         renderServicesConfig();
     }
     
@@ -1022,6 +1051,10 @@ async function saveSettings() {
     // Tema
     const theme = document.getElementById('themeLight').checked ? 'light' : 'dark';
     appConfig.theme = theme;
+
+    // Paleta de cor
+    const paletteChecked = document.querySelector('input[name="palette"]:checked');
+    appConfig.palette = paletteChecked ? paletteChecked.value : 'default';
     
     // Serviços
     Object.keys(appConfig.services).forEach(key => {
@@ -1052,6 +1085,7 @@ async function saveSettings() {
 loadConfig().then(config => {
     if (config) {
         applyTheme(config.theme);
+        applyPalette(config.palette);
         renderServiceCards();
     }
 });

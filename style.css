@@ -1,3 +1,75 @@
+/* Paleta de cor: ver docs/paleta-de-cores.md. --accent* muda por paleta
+   (body.palette-*), os tokens de tema (--bg, --card, --txt, ...) so existem
+   dentro de body.theme-dark, ja que o tema claro usa o cinza padrao do
+   Bootstrap sem equivalente no dashboard web. */
+:root {
+    --accent: #5b8cff;
+    --accent-rgb: 91, 140, 255;
+    --accent-hover: #7aa0ff;
+    --accent-contrast: #fff;
+    --accent-text-light: #4a72d6;
+    --accent-text-dark: #9fb8ff;
+}
+
+body.palette-neon-green {
+    --accent: #2bff88;
+    --accent-rgb: 43, 255, 136;
+    --accent-hover: #6dffab;
+    --accent-contrast: #06280f;
+    --accent-text-light: #159a52;
+    --accent-text-dark: #7dffb8;
+}
+
+body.palette-neon-purple {
+    --accent: #b24bff;
+    --accent-rgb: 178, 75, 255;
+    --accent-hover: #c67bff;
+    --accent-contrast: #fff;
+    --accent-text-light: #7a1fd6;
+    --accent-text-dark: #d9a8ff;
+}
+
+/* Bootstrap 5.3 guarda a cor do botao em custom properties locais na propria
+   classe; sobrescrever aqui muda todo botao primary/outline-primary sem
+   recompilar o Bootstrap. */
+.btn-primary {
+    --bs-btn-color: var(--accent-contrast);
+    --bs-btn-bg: var(--accent);
+    --bs-btn-border-color: var(--accent);
+    --bs-btn-hover-color: var(--accent-contrast);
+    --bs-btn-hover-bg: var(--accent-hover);
+    --bs-btn-hover-border-color: var(--accent-hover);
+    --bs-btn-focus-shadow-rgb: var(--accent-rgb);
+    --bs-btn-active-color: var(--accent-contrast);
+    --bs-btn-active-bg: var(--accent-hover);
+    --bs-btn-active-border-color: var(--accent-hover);
+    --bs-btn-disabled-color: var(--accent-contrast);
+    --bs-btn-disabled-bg: var(--accent);
+    --bs-btn-disabled-border-color: var(--accent);
+}
+
+.btn-outline-primary {
+    --bs-btn-color: var(--accent);
+    --bs-btn-border-color: var(--accent);
+    --bs-btn-hover-color: var(--accent-contrast);
+    --bs-btn-hover-bg: var(--accent);
+    --bs-btn-hover-border-color: var(--accent);
+    --bs-btn-focus-shadow-rgb: var(--accent-rgb);
+    --bs-btn-active-color: var(--accent-contrast);
+    --bs-btn-active-bg: var(--accent);
+    --bs-btn-active-border-color: var(--accent);
+    --bs-btn-disabled-color: var(--accent);
+    --bs-btn-disabled-border-color: var(--accent);
+}
+
+.palette-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 4px;
+}
+
 html, body {
     height: 100%;
     margin: 0;
@@ -221,39 +293,49 @@ i.service-icon {
     word-break: break-all;
 }
 
-/* Theme styles */
+/* Theme styles: tons neutros iguais aos do dashboard web (--bg/--card/--line/
+   --txt/--muted em config/www/index.php), ver docs/paleta-de-cores.md. */
 body.theme-dark {
-    background-color: #1a1a2e !important;
+    --bg: #0f1117;
+    --bg2: #151823;
+    --card-bg: #1b1f2e;
+    --line: #2a3042;
+    --txt: #e7e9f0;
+    --muted: #8b93a7;
+
+    background: linear-gradient(160deg, var(--bg), #11141d 40%, #0d0f16) !important;
+    background-attachment: fixed;
+    color: var(--txt);
 }
 
 body.theme-dark .card {
-    background-color: #16213e;
-    border-color: #0f3460;
-    color: #e4e4e4;
+    background-color: var(--card-bg);
+    border-color: var(--line);
+    color: var(--txt);
 }
 
 body.theme-dark .card-footer {
-    background-color: #0f3460;
-    border-color: #0f3460;
+    background-color: var(--bg2);
+    border-color: var(--line);
 }
 
 body.theme-dark .tab-bar {
-    background-color: #16213e;
-    border-color: #0f3460;
+    background-color: var(--card-bg);
+    border-color: var(--line);
 }
 
 body.theme-dark .tab-bar .nav-link {
-    color: #a0a0a0;
+    color: var(--muted);
 }
 
 body.theme-dark .tab-bar .nav-link.active {
-    background-color: #1a1a2e;
-    color: #fff;
-    border-color: #0f3460 #0f3460 #1a1a2e;
+    background-color: var(--bg);
+    color: var(--txt);
+    border-color: var(--line) var(--line) var(--bg);
 }
 
 body.theme-dark h1, body.theme-dark h2, body.theme-dark h3 {
-    color: #e4e4e4;
+    color: var(--txt);
 }
 
 body.theme-dark .service-icon {
@@ -297,8 +379,8 @@ body.theme-light .card-footer {
 }
 
 #settingsModal .form-control:focus {
-    border-color: #0d6efd;
-    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 0.25rem rgba(var(--accent-rgb), 0.25);
 }
 
 
@@ -333,7 +415,7 @@ body.theme-light .card-footer {
 }
 
 .app-group {
-    border: 1px solid rgba(91, 140, 255, .4);
+    border: 1px solid rgba(var(--accent-rgb), .4);
     border-radius: 14px;
     padding: 14px;
     max-width: 100%;
@@ -346,7 +428,7 @@ body.theme-light .card-footer {
     margin: 0 0 14px;
     font-size: 14px;
     font-weight: 600;
-    color: #4a72d6;
+    color: var(--accent-text-light);
 }
 
 .app-group-title .count {
@@ -356,5 +438,5 @@ body.theme-light .card-footer {
 }
 
 body.theme-dark .app-group-title {
-    color: #9fb8ff;
+    color: var(--accent-text-dark);
 }

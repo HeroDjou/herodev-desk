@@ -1,6 +1,7 @@
 {
     "version": "1.1.0",
     "theme": "light",
+    "palette": "default",
     "activeNode": "local",
     "nodes": {
         "local": {
